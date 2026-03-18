@@ -1,0 +1,29 @@
+ET FinMentor project requirements
+
+Runtime
+- Node.js 20+
+- npm 10+
+- Expo SDK 51 toolchain
+- Android device with Expo Go
+
+Accounts and keys
+- Supabase project with Auth and Postgres enabled
+- Twilio SMS provider connected to Supabase Phone OTP
+- Gemini API key exposed as EXPO_PUBLIC_GEMINI_API_KEY
+
+Environment variables
+- EXPO_PUBLIC_SUPABASE_URL
+- EXPO_PUBLIC_SUPABASE_ANON_KEY
+- EXPO_PUBLIC_GEMINI_API_KEY
+
+Local assets
+- assets/fonts/Syne-Bold.ttf
+- assets/fonts/Syne-SemiBold.ttf
+- assets/fonts/DMSans-Regular.ttf
+- assets/fonts/DMSans-Medium.ttf
+- assets/images/icon.png
+- assets/images/splash.png
+
+Project commands
+- npm install
+- npx expo start --android

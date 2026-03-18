@@ -1,0 +1,39 @@
+{
+  "expo": {
+    "name": "ET FinMentor",
+    "slug": "et-finmentor",
+    "scheme": "et-finmentor",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Allow ET FinMentor to use biometrics to protect your financial dashboard."
+        }
+      ],
+      [
+        "@react-native-voice/voice",
+        {
+          "microphonePermission": "Allow ET FinMentor to access your microphone for voice money check-ins.",
+          "speechRecognitionPermission": "Allow ET FinMentor to securely recognize your speech for voice money check-ins."
+        }
+      ]
+    ],
+    "android": {
+      "package": "com.et.finmentor",
+      "adaptiveIcon": {
+        "backgroundColor": "#0C2340"
+      }
+    },
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
