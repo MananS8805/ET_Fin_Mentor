@@ -4,7 +4,7 @@ import { router } from "expo-router";
 import * as Animatable from "react-native-animatable";
 import * as Sharing from "expo-sharing";
 import ViewShot from "react-native-view-shot";
-import { VictoryAxis, VictoryChart, VictoryLine, VictoryTheme } from "victory-native";
+import { VictoryAxis, VictoryBar, VictoryChart, VictoryLine, VictoryTheme } from "victory-native";
 
 import { AnimatedCurrencyValue } from "../../src/components/AnimatedCurrencyValue";
 import { Button } from "../../src/components/Button";
@@ -13,6 +13,7 @@ import { SliderField } from "../../src/components/SliderField";
 import { AuthService } from "../../src/core/services/AuthService";
 import {
   AssetAllocationStage,
+  GoalSIPAllocation,
   UserProfileData,
   createEmptyUserProfile,
   createIncomeScenarioProfile,
@@ -27,6 +28,8 @@ import {
   getYearsToFire,
   projectedCorpusAtAge,
   sipNeededFor,
+  getSIPAllocationByGoal,
+
 } from "../../src/core/models/UserProfile";
 import { GeminiService } from "../../src/core/services/GeminiService";
 import { useAppStore } from "../../src/core/services/store";
@@ -36,7 +39,7 @@ function EmptyState() {
   return (
     <Screen scroll>
       <View style={styles.hero}>
-        <Text style={styles.eyebrow}>Day 6</Text>
+        {/* Removed Day 6 */}
         <Text style={styles.title}>FIRE Planner + Tax Battle</Text>
         <Text style={styles.subtitle}>
           Finish onboarding first so the planner can use your actual corpus, SIP, deductions, and retirement target.
@@ -172,6 +175,11 @@ export default function FirePlannerTab() {
     () => (plannerProfile ? getFireProjectionSeries(plannerProfile, plannerRetirementAge, plannerTargetExpense) : []),
     [plannerProfile, plannerRetirementAge, plannerTargetExpense]
   );
+
+  const goalBreakdown = useMemo(
+    () => (currentProfile ? getSIPAllocationByGoal(currentProfile) : []),
+    [currentProfile]
+  );
   const chartWidth = Math.max(320, width - Spacing["3xl"]);
 
   const taxScenarioProfile = useMemo(
@@ -189,6 +197,8 @@ export default function FirePlannerTab() {
     () => buildTaxFallbackNarrative(taxAnnualIncome, betterRegime, taxSaving, oldTax, newTax),
     [betterRegime, newTax, oldTax, taxAnnualIncome, taxSaving]
   );
+
+  
 
   useEffect(() => {
     if (!currentProfile) {
@@ -275,7 +285,7 @@ export default function FirePlannerTab() {
   return (
     <Screen scroll>
       <Animatable.View animation="fadeInUp" duration={500} style={styles.hero}>
-        <Text style={styles.eyebrow}>Day 6</Text>
+        {/* Removed Day 6 */}
         <Text style={styles.title}>FIRE Planner + Tax Battle</Text>
         <Text style={styles.subtitle}>
           Tune your retirement age and lifestyle target, then compare tax regimes live against the same deduction base.
@@ -349,9 +359,27 @@ export default function FirePlannerTab() {
           Time remaining: {yearsRemaining} years. Existing SIP: {formatINR(currentProfile.monthlySIP)}/month.
         </Text>
       </Animatable.View>
-
+              
       <Animatable.View animation="fadeInUp" delay={190} duration={500} style={styles.section}>
         <Text style={styles.sectionTitle}>Projection chart</Text>
+        {goalBreakdown.length > 0 ? (
+        <Animatable.View animation="fadeInUp" delay={160} duration={500} style={styles.section}>
+          <Text style={styles.sectionTitle}>SIP by goal</Text>
+          <View style={styles.allocationStack}>
+            {goalBreakdown.map((item) => (
+              <View key={item.goal} style={styles.allocationCard}>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                  <Text style={styles.allocationTitle} numberOfLines={1}>{item.goal}</Text>
+                  <Text style={styles.allocationValue}>{formatINR(item.sipAmount)}/mo</Text>
+                </View>
+                <Text style={styles.allocationHelper}>
+                  {item.horizonYears}yr horizon · target {formatINR(item.targetCorpus, true)}
+                </Text>
+              </View>
+            ))}
+          </View>
+        </Animatable.View>
+      ) : null}
         <View style={styles.chartCard}>
           <View style={styles.legendRow}>
             <View style={styles.legendItem}>
@@ -415,6 +443,55 @@ export default function FirePlannerTab() {
         <View style={styles.allocationStack}>
           {allocationSchedule.map((item) => (
             <AllocationCard item={item} key={item.label} />
+          ))}
+        </View>
+      </Animatable.View>
+
+      <Animatable.View animation="fadeInUp" delay={280} duration={500} style={styles.section}>
+        <Text style={styles.sectionTitle}>12-Month Roadmap</Text>
+        <View style={{ backgroundColor: Colors.card, borderRadius: Radius.lg, borderWidth: 0.5, borderColor: Colors.border, padding: Spacing.xl }}>
+          {[...Array(12)].map((_, i) => (
+            <View key={i} style={{ flexDirection: "row", borderBottomWidth: i === 11 ? 0 : 0.5, borderBottomColor: Colors.border, paddingVertical: 12 }}>
+              <View style={{ width: 64, justifyContent: "center" }}>
+                <Text style={{ color: Colors.textSecondary, fontFamily: Typography.fontFamily.bodyMedium, fontSize: 13, textTransform: "uppercase" }}>MTH {i + 1}</Text>
+              </View>
+              <View style={{ flex: 1, paddingLeft: 12 }}>
+                <Text style={{ color: Colors.textPrimary, fontFamily: Typography.fontFamily.bodyMedium, fontSize: 15 }}>
+                  Invest {formatINR(requiredSip)}
+                </Text>
+                <Text style={{ color: Colors.textSecondary, fontFamily: Typography.fontFamily.body, fontSize: 13, marginTop: 2 }}>
+                  Split across {goalBreakdown.length > 0 ? goalBreakdown.map(g => g.goal).join(", ") : "Index Funds & Debt"}
+                </Text>
+                {i === 0 && sipGap > 0 && (
+                  <View style={{ backgroundColor: "rgba(245,166,35,0.12)", padding: 8, borderRadius: 6, marginTop: 8 }}>
+                    <Text style={{ color: Colors.gold, fontFamily: Typography.fontFamily.bodyMedium, fontSize: 12 }}>
+                      🚀 Action: Step up SIP by {formatINR(sipGap)} to close your trajectory gap.
+                    </Text>
+                  </View>
+                )}
+                {i === 3 && (
+                  <View style={{ backgroundColor: "rgba(29,158,117,0.12)", padding: 8, borderRadius: 6, marginTop: 8 }}>
+                    <Text style={{ color: Colors.teal, fontFamily: Typography.fontFamily.bodyMedium, fontSize: 12 }}>
+                      ⚖️ Action: Rebalance equity to match {allocationSchedule[0]?.equity || 70}%.
+                    </Text>
+                  </View>
+                )}
+                {i === 6 && (
+                  <View style={{ backgroundColor: "rgba(127,119,221,0.12)", padding: 8, borderRadius: 6, marginTop: 8 }}>
+                    <Text style={{ color: Colors.purple, fontFamily: Typography.fontFamily.bodyMedium, fontSize: 12 }}>
+                      💼 Action: Evaluate corporate bonus and lump-sum into FIRE corpus.
+                    </Text>
+                  </View>
+                )}
+                {i === 11 && (
+                  <View style={{ backgroundColor: "rgba(255,255,255,0.06)", padding: 8, borderRadius: 6, marginTop: 8 }}>
+                    <Text style={{ color: Colors.textSecondary, fontFamily: Typography.fontFamily.bodyMedium, fontSize: 12 }}>
+                      🛡️ Action: Annual review of Term Insurance & Emergency Fund limits.
+                    </Text>
+                  </View>
+                )}
+              </View>
+            </View>
           ))}
         </View>
       </Animatable.View>

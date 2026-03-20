@@ -28,6 +28,9 @@ export interface UserProfileData {
   goals: string[];
   totalDebt: number;
   onboardingComplete: boolean;
+  camsData?: {
+    holdings: MFHolding[];
+  };
 }
 
 export interface HealthScoreDimensions {
@@ -121,6 +124,34 @@ export interface MonthlyMoneyCardData {
   investmentPct: number;
 }
 
+export interface MFHolding {
+  id: string;
+  name: string;
+  category: "large_cap" | "mid_cap" | "small_cap" | "elss" | "debt" | "hybrid" | "liquid" | "other";
+  units: number;
+  nav: number;
+  currentValue: number;
+  purchaseValue: number;
+  xirr: number | null; // null if insufficient cashflow data
+}
+
+export interface OverlapPair {
+  fund1: string;
+  fund2: string;
+  overlapLevel: "high" | "medium" | "low";
+  reason: string;
+}
+
+export interface PortfolioXRay {
+  holdings: MFHolding[];
+  totalValue: number;
+  totalInvested: number;
+  overallXIRR: number | null;
+  overlapPairs: OverlapPair[];
+  expenseRatioDrag: number;   // annual ₹ lost vs index equivalent
+  categoryAllocation: Record<MFHolding["category"], number>; // percentage per category
+}
+
 export interface SipCalendarMonth {
   key: string;
   label: string;
@@ -174,21 +205,80 @@ export interface TaxWizardSnapshot {
   rankedRecommendations: TaxSavingRecommendation[];
 }
 
-const OLD_REGIME_SLABS = [
-  { upto: 250_000, rate: 0 },
-  { upto: 500_000, rate: 0.05 },
-  { upto: 1_000_000, rate: 0.2 },
-  { upto: Number.POSITIVE_INFINITY, rate: 0.3 },
-] as const;
+export interface PartnerProfileData {
+  name: string;
+  age: number;
+  monthlyIncome: number;
+  annualIncome: number;
+  basicSalary: number;
+  annualPF: number;
+  annual80C: number;
+  annualNPS: number;
+  annualHRA: number;
+  existingCorpus: number;
+  monthlySIP: number;
+  termInsuranceCover: number;
+  healthInsuranceCover: number;
+}
 
-const NEW_REGIME_SLABS = [
-  { upto: 300_000, rate: 0 },
-  { upto: 700_000, rate: 0.05 },
-  { upto: 1_000_000, rate: 0.1 },
-  { upto: 1_200_000, rate: 0.15 },
-  { upto: 1_500_000, rate: 0.2 },
-  { upto: Number.POSITIVE_INFINITY, rate: 0.3 },
-] as const;
+export interface JointHomeLoan {
+  active: boolean;
+  totalPrincipalOutstandig: number;
+  monthlyEMI: number;
+  annualInterest: number;
+  annualPrincipal: number;
+}
+
+export interface JointPortfolioSummary {
+  combinedCorpus: number;
+  combinedSIP: number;
+  userLTCG: number; // current unrealized LTCG for user
+  partnerLTCG: number; // current unrealized LTCG for partner
+}
+
+export interface JointProfileData {
+  user: UserProfileData;
+  partner: PartnerProfileData | null;
+  homeLoan: JointHomeLoan;
+  portfolio: JointPortfolioSummary;
+}
+
+export interface JointOptimizationResult {
+  combinedNetWorth: number;
+  hraSuggestion: {
+    recommendedClaimer: "user" | "partner" | "split" | "none";
+    estimatedSaving: number;
+    reason: string;
+  };
+  npsStrategy: {
+    userContribution: number;
+    partnerContribution: number;
+    message: string;
+  };
+  sipSplits: {
+    userSIP: number;
+    partnerSIP: number;
+    reason: string;
+  };
+  insuranceAdvice: {
+    type: "individual" | "joint-floater";
+    reason: string;
+    action: string;
+  };
+  taxHarvesting: {
+    userSell: number;
+    partnerSell: number;
+    totalTaxFreeGain: number;
+    nextStep: string;
+  };
+  homeLoanAdvice: {
+    optimalInterestClaimer: "user" | "partner" | "split";
+    optimalPrincipalClaimer: "user" | "partner" | "split";
+    estimatedTaxBenefit: number;
+  };
+}
+
+import { OLD_REGIME_SLABS, NEW_REGIME_SLABS } from "../config/tax";
 
 const HEALTH_DIMENSION_LABELS: Record<HealthDimensionKey, string> = {
   emergency: "Emergency",
@@ -499,6 +589,47 @@ export function sipNeededFor(
   }
 
   return roundToTwo(remainingTarget / annuityFactor);
+}
+
+export interface GoalSIPAllocation {
+  goal: string;
+  sipAmount: number;
+  targetCorpus: number;
+  horizonYears: number;
+}
+
+const GOAL_HORIZON_YEARS: Record<string, number> = {
+  retirement: 0,          // uses yearsToRetirement
+  "buy a home": 5,
+  "children education": 15,
+  "parents care fund": 10,
+  "emergency backup": 2,
+  vacation: 3,
+  "debt free": 5,
+  "wealth creation": 20,
+};
+
+export function getSIPAllocationByGoal(profile: UserProfileData): GoalSIPAllocation[] {
+  if (!profile.goals.length || profile.monthlySIP <= 0) return [];
+
+  const yearsToRetirement = Math.max(1, profile.retirementAge - profile.age);
+
+  const goalsWithHorizon = profile.goals.map((goal) => ({
+    goal,
+    horizonYears: goal === "retirement" ? yearsToRetirement : (GOAL_HORIZON_YEARS[goal] ?? 10),
+  }));
+
+  // Weight SIP allocation inversely by horizon — shorter goals get more monthly SIP
+  const totalWeight = goalsWithHorizon.reduce((sum, g) => sum + 1 / g.horizonYears, 0);
+
+  return goalsWithHorizon.map(({ goal, horizonYears }) => {
+    const weight = 1 / horizonYears / totalWeight;
+    const sipAmount = roundToTwo(profile.monthlySIP * weight);
+    const targetCorpus = roundToTwo(
+      sipAmount * (((Math.pow(1.12, horizonYears) - 1) / (0.12 / 12)) * (1 + 0.12 / 12))
+    );
+    return { goal, sipAmount, targetCorpus, horizonYears };
+  });
 }
 
 export function getMonthlyPassiveIncome(corpus: number): number {
@@ -1007,6 +1138,102 @@ export function getSipMilestone(streak: number): 3 | 6 | 12 | null {
   return null;
 }
 
+// Newton-Raphson XIRR — pure TS, no library needed
+export function calculateXIRR(
+  cashflows: Array<{ date: Date; amount: number }>,
+  guess = 0.1
+): number | null {
+  if (cashflows.length < 2) return null;
+
+  const first = cashflows[0].date.getTime();
+  const years = cashflows.map((cf) => (cf.date.getTime() - first) / (365.25 * 24 * 3600 * 1000));
+
+  let rate = guess;
+
+  for (let i = 0; i < 100; i++) {
+    let npv = 0;
+    let dNpv = 0;
+
+    for (let j = 0; j < cashflows.length; j++) {
+      const factor = Math.pow(1 + rate, years[j]);
+      npv += cashflows[j].amount / factor;
+      dNpv -= (years[j] * cashflows[j].amount) / (factor * (1 + rate));
+    }
+
+    if (Math.abs(dNpv) < 1e-10) break;
+    const next = rate - npv / dNpv;
+    if (Math.abs(next - rate) < 1e-7) return roundToTwo(next * 100); // return as %
+    rate = next;
+  }
+
+  return roundToTwo(rate * 100);
+}
+
+// Category-based overlap detection — no external data needed
+export function getOverlapPairs(holdings: MFHolding[]): OverlapPair[] {
+  const pairs: OverlapPair[] = [];
+  const highOverlapCategories: Array<MFHolding["category"]> = ["large_cap", "elss"];
+
+  for (let i = 0; i < holdings.length; i++) {
+    for (let j = i + 1; j < holdings.length; j++) {
+      const a = holdings[i];
+      const b = holdings[j];
+
+      if (a.category === b.category && highOverlapCategories.includes(a.category)) {
+        pairs.push({
+          fund1: a.name,
+          fund2: b.name,
+          overlapLevel: "high",
+          reason: `Both are ${a.category.replace("_", " ")} funds — typically 60–80% stock overlap.`,
+        });
+      } else if (
+        (a.category === "large_cap" && b.category === "elss") ||
+        (a.category === "elss" && b.category === "large_cap")
+      ) {
+        pairs.push({
+          fund1: a.name,
+          fund2: b.name,
+          overlapLevel: "medium",
+          reason: "ELSS funds hold significant large-cap stocks — partial overlap expected.",
+        });
+      }
+    }
+  }
+
+  return pairs;
+}
+
+// Weighted expense ratio drag vs a 0.1% index fund
+export function getExpenseRatioDrag(holdings: MFHolding[]): number {
+  const total = holdings.reduce((sum, h) => sum + h.currentValue, 0);
+  if (total === 0) return 0;
+
+  // Typical category expense ratios (direct plan averages)
+  const avgExpenseRatio: Record<MFHolding["category"], number> = {
+    large_cap: 0.95, mid_cap: 1.2, small_cap: 1.4,
+    elss: 1.1, debt: 0.5, hybrid: 1.0, liquid: 0.2, other: 1.0,
+  };
+
+  const weightedRatio = holdings.reduce((sum, h) => {
+    return sum + (h.currentValue / total) * avgExpenseRatio[h.category];
+  }, 0);
+
+  const indexRatio = 0.1;
+  const dragPercent = Math.max(0, weightedRatio - indexRatio);
+  return roundToTwo((dragPercent / 100) * total);
+}
+
+export function getCategoryAllocation(holdings: MFHolding[]): PortfolioXRay["categoryAllocation"] {
+  const total = holdings.reduce((sum, h) => sum + h.currentValue, 0);
+  const alloc: Partial<PortfolioXRay["categoryAllocation"]> = {};
+
+  for (const h of holdings) {
+    alloc[h.category] = roundToTwo(((alloc[h.category] ?? 0) + (total > 0 ? (h.currentValue / total) * 100 : 0)));
+  }
+
+  return alloc as PortfolioXRay["categoryAllocation"];
+}
+
 export function getDebtToIncomeRatio(profile: UserProfileData): number {
   if (profile.monthlyIncome <= 0) {
     return 0;
@@ -1339,6 +1566,117 @@ export function formatINR(value: number, compact = false): string {
   }
 
   return `${sign}\u20B9${trimTrailingZero(absolute.toFixed(0))}`;
+}
+
+export function getTaxBracket(annualIncome: number): number {
+  if (annualIncome > 1000000) return 0.3;
+  if (annualIncome > 500000) return 0.2;
+  if (annualIncome > 250000) return 0.05;
+  return 0;
+}
+
+export function calculateJointOptimization(jointData: JointProfileData): JointOptimizationResult {
+  const { user, partner, homeLoan, portfolio } = jointData;
+  const userIncome = safeAnnualIncome(user);
+  const partnerIncome = partner ? partner.annualIncome : 0;
+
+  const userBracket = getTaxBracket(userIncome);
+  const partnerBracket = getTaxBracket(partnerIncome);
+
+  // 1. Combined Net Worth
+  const combinedNetWorth =
+    user.existingCorpus +
+    (partner?.existingCorpus ?? 0) -
+    user.totalDebt -
+    (homeLoan.active ? homeLoan.totalPrincipalOutstandig : 0);
+
+  // 2. HRA Optimization
+  let hraSuggestion: JointOptimizationResult["hraSuggestion"] = {
+    recommendedClaimer: "none",
+    estimatedSaving: 0,
+    reason: "No partner data or HRA inputs identified.",
+  };
+
+  if (partner) {
+    const higherBracket = userBracket > partnerBracket ? "user" : "partner";
+    const bracketDiff = Math.abs(userBracket - partnerBracket);
+    const potentialHra = Math.max(user.annualHRA, partner.annualHRA);
+
+    if (bracketDiff > 0) {
+      hraSuggestion = {
+        recommendedClaimer: higherBracket as any,
+        estimatedSaving: potentialHra * bracketDiff,
+        reason: `${higherBracket === "user" ? user.name : partner.name} is in a higher tax bracket (${(
+          Math.max(userBracket, partnerBracket) * 100
+        ).toFixed(0)}%). Claiming HRA here maximizes tax savings.`,
+      };
+    } else {
+      hraSuggestion = {
+        recommendedClaimer: "split",
+        estimatedSaving: 0,
+        reason: "Both are in the same tax bracket. You can split HRA claims as per convenience.",
+      };
+    }
+  }
+
+  // 3. Tax Harvesting
+  const userHarvest = Math.min(portfolio.userLTCG, 125_000);
+  const partnerHarvest = Math.min(portfolio.partnerLTCG, 125_000);
+  const taxHarvesting: JointOptimizationResult["taxHarvesting"] = {
+    userSell: userHarvest,
+    partnerSell: partnerHarvest,
+    totalTaxFreeGain: userHarvest + partnerHarvest,
+    nextStep: `Sell units with up to ${formatINR(userHarvest)} gain for ${user.name} and ${formatINR(
+      partnerHarvest
+    )} for partner to use the combined ₹2.5L tax-free limit.`,
+  };
+
+  // 4. Home Loan Advice
+  let homeLoanAdvice: JointOptimizationResult["homeLoanAdvice"] = {
+    optimalInterestClaimer: "split",
+    optimalPrincipalClaimer: "split",
+    estimatedTaxBenefit: 0,
+  };
+
+  if (homeLoan.active && partner) {
+    const interestLimit = 200_000;
+    const optimalInterest = userBracket > partnerBracket ? "user" : partnerBracket > userBracket ? "partner" : "split";
+    homeLoanAdvice = {
+      optimalInterestClaimer: optimalInterest as any,
+      optimalPrincipalClaimer: "split",
+      estimatedTaxBenefit: Math.min(homeLoan.annualInterest, interestLimit) * Math.max(userBracket, partnerBracket),
+    };
+  }
+
+  // 5. SIP Splits
+  const user80CRoom = Math.max(0, 150_000 - (user.annual80C + user.annualPF));
+  const partner80CRoom = partner ? Math.max(0, 150_000 - (partner.annual80C + partner.annualPF)) : 0;
+  
+  const sipSplits: JointOptimizationResult["sipSplits"] = {
+    userSIP: user.monthlySIP,
+    partnerSIP: partner?.monthlySIP ?? 0,
+    reason: partner 
+      ? `Allocate SIPs to fill ${user.name}'s ₹${formatIndianDigits(user80CRoom)} room and partner's ₹${formatIndianDigits(partner80CRoom)} room to maximize 80C benefits across both.`
+      : "Start by adding partner data to optimize joint SIP splits.",
+  };
+
+  return {
+    combinedNetWorth,
+    hraSuggestion,
+    taxHarvesting,
+    homeLoanAdvice,
+    sipSplits,
+    npsStrategy: {
+      userContribution: userBracket > 0 ? 50_000 : 0,
+      partnerContribution: partnerBracket > 0 ? 50_000 : 0,
+      message: "Utilize the additional ₹50,000 NPS deduction (80CCD 1B) for both to save up to ₹31,200 in taxes.",
+    },
+    insuranceAdvice: {
+      type: "joint-floater",
+      reason: "A joint family floater plan is usually 20-30% cheaper than two individual plans with the same total cover.",
+      action: "Check premium for a ₹10L+ family floater policy for both of you.",
+    },
+  };
 }
 
 export function getFinancialSnapshot(profile: UserProfileData) {

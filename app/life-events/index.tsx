@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { Alert, Pressable, StyleSheet, Text, View,TextInput } from "react-native";
 import { router } from "expo-router";
 import * as Sharing from "expo-sharing";
 import ViewShot from "react-native-view-shot";
@@ -27,7 +27,7 @@ function EmptyState() {
   return (
     <Screen scroll>
       <View style={styles.hero}>
-        <Text style={styles.eyebrow}>Day 8</Text>
+        {/* Removed Day 8 */}
         <Text style={styles.title}>Life Events + SIP Streak</Text>
         <Text style={styles.subtitle}>
           Finish onboarding first so event advice, streaks, and the monthly money card all use your real financial
@@ -82,6 +82,9 @@ export default function LifeEventsScreen() {
     () => (currentProfile ? getMonthlyMoneyCardData(currentProfile) : null),
     [currentProfile]
   );
+  const [followUpInput, setFollowUpInput] = useState("");
+const [followUpReply, setFollowUpReply] = useState("");
+const [followUpLoading, setFollowUpLoading] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -173,6 +176,24 @@ export default function LifeEventsScreen() {
     }
   }
 
+  async function handleFollowUp() {
+  const trimmed = followUpInput.trim();
+  if (!trimmed || followUpLoading || !currentProfile) return;
+  try {
+    setFollowUpLoading(true);
+    setFollowUpReply("");
+    // Inject event context into the question
+    const contextualQuestion = `Regarding my ${selectedEvent} life event plan: ${trimmed}`;
+    const result = await GeminiService.sendMessage(contextualQuestion, currentProfile, []);
+    setFollowUpReply(result.modelMessage.text);
+    setFollowUpInput("");
+  } catch (error) {
+    setFollowUpReply("Unable to load a reply right now. Please try again.");
+  } finally {
+    setFollowUpLoading(false);
+  }
+}
+
   const immediateText = activeAdvice.immediate.map((item) => `• ${item}`).join("\n");
   const soonText = activeAdvice.soon.map((item) => `• ${item}`).join("\n");
   const longTermText = activeAdvice.longTerm.map((item) => `• ${item}`).join("\n");
@@ -182,7 +203,7 @@ export default function LifeEventsScreen() {
       {confettiLevel ? <ConfettiCannon count={160} fadeOut origin={{ x: 180, y: 0 }} /> : null}
 
       <View style={styles.hero}>
-        <Text style={styles.eyebrow}>Day 8</Text>
+        {/* Removed Day 8 */}
         <Text style={styles.title}>Life Events + SIP Streak</Text>
         <Text style={styles.subtitle}>
           Pick a real-life money moment, get a structured plan back, and keep your SIP habit alive month after month.
@@ -219,6 +240,7 @@ export default function LifeEventsScreen() {
           <AdviceSection accent={Colors.teal} body={soonText} title="Soon (1-6 months)" />
           <AdviceSection accent={Colors.purple} body={longTermText} title="Long term" />
         </View>
+         
       </View>
 
       <View style={styles.section}>

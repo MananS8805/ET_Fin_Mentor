@@ -222,7 +222,12 @@ export default function TaxWizardScreen() {
           : current
       );
     } catch (error) {
-      Alert.alert("Unable to parse Form 16", error instanceof Error ? error.message : "Please enter the values manually.");
+      const msg = error instanceof Error ? error.message : "Parsing failed.";
+      if (msg.includes("NOISY_DATA") || msg.includes("confidence")) {
+        setScanNote("Image is blurry or missing key data. Please verify or enter manually below.");
+      } else {
+        setScanNote("Couldn't read Form 16 automatically. Please enter your salary details manually.");
+      }
     } finally {
       setBusy(null);
     }

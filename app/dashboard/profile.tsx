@@ -72,6 +72,12 @@ export default function ProfileTab() {
         </View>
       ) : null}
 
+      <Button
+  label="Edit profile"
+  onPress={() => router.push("/profile-edit" as never)}
+  variant="secondary"
+/>
+
       <View style={styles.securityCard}>
         <Text style={styles.cardTitle}>Security</Text>
         <Text style={styles.cardBody}>

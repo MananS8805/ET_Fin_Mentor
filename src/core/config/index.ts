@@ -26,6 +26,7 @@ export const StorageKeys = {
   dismissedAlerts: "et_finmentor_dismissed_alerts",
   alertNotificationSignature: "et_finmentor_alert_notification_signature",
   sipLogs: "et_finmentor_sip_logs",
+healthScoreHistory: "et_finmentor_health_score_history",
 } as const;
 
 export const AppConfig = {

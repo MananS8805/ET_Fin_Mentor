@@ -8,29 +8,31 @@ type TextFieldProps = TextInputProps & {
   hint?: string;
   prefix?: string;
   dark?: boolean;
+  error?: string;
 };
 
 export const TextField = forwardRef<TextInput, TextFieldProps>(function TextField(
-  { label, hint, prefix, dark = false, style, ...props },
+  { label, hint, prefix, dark = false, error, style, ...props },
   ref
 ) {
-  const backgroundColor = dark ? "rgba(255,255,255,0.08)" : Colors.white;
-  const borderColor = dark ? "rgba(255,255,255,0.12)" : Colors.border;
-  const textColor = dark ? Colors.white : Colors.textPrimary;
-  const hintColor = dark ? "rgba(255,255,255,0.68)" : Colors.textSecondary;
+  const backgroundColor = Colors.card;
+  const borderColor = error ? Colors.red : Colors.border;
+  const textColor = Colors.textPrimary;
+  const hintColor = Colors.textSecondary;
 
   return (
     <View style={styles.wrapper}>
-      <Text style={[styles.label, { color: dark ? Colors.white : Colors.textPrimary }]}>{label}</Text>
-      <View style={[styles.inputRow, { backgroundColor, borderColor }]}>
+      <Text style={[styles.label, { color: Colors.textPrimary }]}>{label}</Text>
+      <View style={[styles.inputRow, { backgroundColor, borderColor, borderWidth: error ? 1.5 : 1 }]}>
         {prefix ? <Text style={[styles.prefix, { color: hintColor }]}>{prefix}</Text> : null}
         <TextInput
           ref={ref}
-          placeholderTextColor={dark ? "rgba(255,255,255,0.45)" : Colors.textMuted}
+          placeholderTextColor={Colors.textMuted}
           style={[styles.input, { color: textColor }, style]}
           {...props}
         />
       </View>
+      {error ? <Text style={[styles.hint, styles.errorHint]}>{error}</Text> : null}
       {hint ? <Text style={[styles.hint, { color: hintColor }]}>{hint}</Text> : null}
     </View>
   );
@@ -66,6 +68,10 @@ const styles = StyleSheet.create({
   hint: {
     fontFamily: Typography.fontFamily.body,
     fontSize: Typography.size.xs,
+  },
+  errorHint: {
+    color: Colors.red,
+    fontWeight: "600",
   },
 });
 

@@ -31,6 +31,7 @@ type UserProfileRow = {
   goals: string[] | null;
   total_debt: number | null;
   onboarding_complete: boolean | null;
+  cams_data: any | null;
 };
 
 export interface SaveProfileResult {
@@ -40,31 +41,11 @@ export interface SaveProfileResult {
   syncError: string | null;
 }
 
+import { normalizePhone } from "../utils/phone";
+
 const SECURE_STORE_OPTIONS: SecureStore.SecureStoreOptions = {
   keychainService: "et-finmentor",
 };
-
-function toNumber(value: number | null | undefined): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-
-function normalizePhone(rawPhone: string): string {
-  const digits = rawPhone.replace(/\D/g, "");
-
-  if (!digits) {
-    return "";
-  }
-
-  if (digits.length === 10) {
-    return `+91${digits}`;
-  }
-
-  if (digits.length === 12 && digits.startsWith("91")) {
-    return `+${digits}`;
-  }
-
-  return rawPhone.trim();
-}
 
 function toRow(profile: UserProfileData, userId: string) {
   return {
@@ -92,6 +73,7 @@ function toRow(profile: UserProfileData, userId: string) {
     goals: profile.goals,
     total_debt: profile.totalDebt,
     onboarding_complete: profile.onboardingComplete,
+    cams_data: profile.camsData ?? null,
   };
 }
 
@@ -121,6 +103,7 @@ function fromRow(row: Partial<UserProfileRow>): UserProfileData {
     goals: row.goals ?? [],
     totalDebt: toNumber(row.total_debt),
     onboardingComplete: Boolean(row.onboarding_complete),
+    camsData: row.cams_data ?? undefined,
   });
 }
 
@@ -129,8 +112,6 @@ async function saveLocalProfile(profile: UserProfileData) {
 }
 
 export const ProfileService = {
-  normalizePhone,
-
   async getLocalProfile() {
     const rawProfile = await SecureStore.getItemAsync(StorageKeys.profile, SECURE_STORE_OPTIONS);
 
@@ -179,59 +160,73 @@ export const ProfileService = {
   },
 
   async saveProfile(profile: UserProfileData, session: Session | null): Promise<SaveProfileResult> {
-    const sanitizedProfile = createEmptyUserProfile({
-      ...profile,
-      phone: normalizePhone(profile.phone),
-      annualIncome: profile.annualIncome || profile.monthlyIncome * 12,
-      onboardingComplete: true,
-    });
+    const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    pendingSaveRequests.add(requestId);
 
-    await saveLocalProfile(sanitizedProfile);
+    try {
+      const sanitizedProfile = createEmptyUserProfile({
+        ...profile,
+        phone: normalizePhone(profile.phone),
+        annualIncome: profile.annualIncome || profile.monthlyIncome * 12,
+        onboardingComplete: true,
+      });
 
-    if (!session?.user?.id) {
+      await saveLocalProfile(sanitizedProfile);
+
+      if (!pendingSaveRequests.has(requestId)) {
+        return {
+          profile: sanitizedProfile,
+          savedLocally: true,
+          syncedToSupabase: false,
+          syncError: "Save request was superseded by a newer request.",
+        };
+      }
+
+      if (!session?.user?.id || !AppConfig.isSupabaseConfigured()) {
+        return {
+          profile: sanitizedProfile,
+          savedLocally: true,
+          syncedToSupabase: false,
+          syncError: "No authenticated session or Supabase config found.",
+        };
+      }
+
+      const response = await supabase
+        .from("user_profiles")
+        .upsert(toRow(sanitizedProfile, session.user.id), { onConflict: "user_id" })
+        .select("*")
+        .single();
+
+      if (!pendingSaveRequests.has(requestId)) {
+        return {
+          profile: sanitizedProfile,
+          savedLocally: true,
+          syncedToSupabase: false,
+          syncError: "Save request was superseded during the Supabase operation.",
+        };
+      }
+
+      if (response.error) {
+        console.warn("[ProfileService] Supabase profile save failed", response.error.message);
+        return {
+          profile: sanitizedProfile,
+          savedLocally: true,
+          syncedToSupabase: false,
+          syncError: response.error.message,
+        };
+      }
+
+      const remoteProfile = fromRow(response.data as Partial<UserProfileRow>);
+      await saveLocalProfile(remoteProfile);
+
       return {
-        profile: sanitizedProfile,
+        profile: remoteProfile,
         savedLocally: true,
-        syncedToSupabase: false,
-        syncError: "No authenticated Supabase session was found on the device.",
+        syncedToSupabase: true,
+        syncError: null,
       };
+    } finally {
+      pendingSaveRequests.delete(requestId);
     }
-
-    if (!AppConfig.isSupabaseConfigured()) {
-      return {
-        profile: sanitizedProfile,
-        savedLocally: true,
-        syncedToSupabase: false,
-        syncError: "Supabase environment variables are missing in the app runtime.",
-      };
-    }
-
-    const response = await supabase
-      .from("user_profiles")
-      .upsert(toRow(sanitizedProfile, session.user.id), {
-        onConflict: "user_id",
-      })
-      .select("*")
-      .single();
-
-    if (response.error) {
-      console.warn("[ProfileService] Supabase profile save failed", response.error.message);
-      return {
-        profile: sanitizedProfile,
-        savedLocally: true,
-        syncedToSupabase: false,
-        syncError: response.error.message,
-      };
-    }
-
-    const remoteProfile = fromRow(response.data as Partial<UserProfileRow>);
-    await saveLocalProfile(remoteProfile);
-
-    return {
-      profile: remoteProfile,
-      savedLocally: true,
-      syncedToSupabase: true,
-      syncError: null,
-    };
   },
 };

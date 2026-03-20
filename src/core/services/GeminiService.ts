@@ -9,6 +9,9 @@ import {
   getMonthlyPassiveIncome,
 } from "../models/UserProfile";
 import { AuthService } from "./AuthService";
+import { TemplateService } from "./TemplateService";
+import { ChatRouter } from "./ChatRouter";
+import { OCRService } from "./OCRService";
 
 export type ChatRole = "user" | "model";
 export type ChatMessageKind = "standard" | "welcome" | "system" | "error";
@@ -67,6 +70,21 @@ export interface TaxBattleNarrativeInput {
 }
 
 export interface LifeEventAdviceResponse extends LifeEventAdvice {}
+
+export interface CAMSHolding {
+  name: string;
+  category: string;
+  units: number;
+  nav: number;
+  currentValue: number;
+  purchaseValue: number;
+  transactions: Array<{ date: string; amount: number }>; // negative = investment, positive = redemption
+}
+
+export interface CAMSParseResult {
+  holdings: CAMSHolding[];
+  notes?: string | null;
+}
 
 interface GeminiResponse {
   candidates?: Array<{
@@ -142,7 +160,7 @@ async function requestGemini(body: Record<string, unknown>) {
   await ensureGeminiAccess();
 
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${AppConfig.geminiApiKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${AppConfig.geminiApiKey}`,
     {
       method: "POST",
       headers: {
@@ -159,7 +177,52 @@ async function requestGemini(body: Record<string, unknown>) {
   return (await response.json()) as GeminiResponse;
 }
 
+async function requestGeminiStream(
+  body: Record<string, unknown>,
+  onChunk: (delta: string) => void
+): Promise<void> {
+  await ensureGeminiAccess();
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:streamGenerateContent?alt=sse&key=${AppConfig.geminiApiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(`Gemini stream failed with status ${response.status}.`);
+  }
+
+  const reader = response.body?.getReader();
+  const decoder = new TextDecoder();
+
+  if (!reader) throw new Error("No readable stream returned.");
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    const chunk = decoder.decode(value, { stream: true });
+    // SSE lines look like: data: {"candidates":[{"content":{"parts":[{"text":"hello"}]}}]}
+    for (const line of chunk.split("\n")) {
+      if (!line.startsWith("data: ")) continue;
+      try {
+        const json = JSON.parse(line.slice(6)) as GeminiResponse;
+        const delta = json.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+        if (delta) onChunk(delta);
+      } catch {
+        // partial JSON line — skip
+      }
+    }
+  }
+}
+
 const conversationHistory: ChatMessage[] = [];
+
+const MAX_HISTORY = 50;
 
 export const GeminiService = {
   createUserMessage(text: string): ChatMessage {
@@ -191,7 +254,23 @@ export const GeminiService = {
   },
 
   async sendMessage(message: string, profile: UserProfileData, history: ChatMessage[] = conversationHistory) {
+    if (history.length > MAX_HISTORY) {
+      history.splice(0, history.length - MAX_HISTORY);
+    }
     const userMessage = this.createUserMessage(message);
+
+    const localResponse = ChatRouter.routeMessage(message);
+    if (localResponse) {
+      const modelMessage = this.createModelMessage(localResponse);
+      const newHistory = [...history, userMessage, modelMessage];
+      conversationHistory.splice(0, conversationHistory.length, ...newHistory);
+      return {
+        userMessage,
+        modelMessage,
+        history: [...conversationHistory],
+      };
+    }
+
     const apiHistory = [...history, userMessage];
 
     const data = await requestGemini({
@@ -203,6 +282,7 @@ export const GeminiService = {
         temperature: 0.7,
         maxOutputTokens: 450,
       },
+  
     });
     const text = extractCandidateText(data);
 
@@ -221,224 +301,118 @@ export const GeminiService = {
     };
   },
 
+  async streamMessage(
+  message: string,
+  profile: UserProfileData,
+  onChunk: (delta: string) => void,
+  history: ChatMessage[] = conversationHistory
+): Promise<{ userMessage: ChatMessage; modelMessage: ChatMessage }> {
+  if (history.length > MAX_HISTORY) {
+    history.splice(0, history.length - MAX_HISTORY);
+  }
+  const userMessage = this.createUserMessage(message);
+
+  const localResponse = ChatRouter.routeMessage(message);
+  if (localResponse) {
+    const chunks = localResponse.split(" ");
+    for (const word of chunks) {
+      onChunk(word + " ");
+      await new Promise(r => setTimeout(r, 20)); // Fake stream delay
+    }
+    const modelMessage = this.createModelMessage(localResponse);
+    const newHistory = [...history, userMessage, modelMessage];
+    conversationHistory.splice(0, conversationHistory.length, ...newHistory);
+    return { userMessage, modelMessage };
+  }
+
+  const apiHistory = [...history, userMessage];
+  let fullText = "";
+
+  await requestGeminiStream(
+    {
+      system_instruction: { parts: [{ text: buildSystemInstruction(profile) }] },
+      contents: toGeminiContents(apiHistory),
+      generationConfig: { temperature: 0.7, maxOutputTokens: 450 },
+    },
+    (delta) => {
+      fullText += delta;
+      onChunk(delta);
+    }
+  );
+
+  if (!fullText) throw new Error("Gemini stream returned no content.");
+
+  const modelMessage = this.createModelMessage(fullText);
+  conversationHistory.splice(0, conversationHistory.length, ...apiHistory, modelMessage);
+
+  return { userMessage, modelMessage };
+},
+
   async parseSalarySlip(imageBase64: string, mimeType = "image/jpeg") {
-    const data = await requestGemini({
-      contents: [
-        {
-          role: "user",
-          parts: [
-            {
-              text: [
-                "Read this Indian salary slip or payslip image and return strict JSON only.",
-                "Use numeric rupee amounts without commas.",
-                "Prefer take-home or net monthly salary for monthlyIncome when visible; otherwise use gross monthly salary.",
-                "Return keys: name, monthlyIncome, annualIncome, annualPF, annual80C, annualNPS, annualHRA, employerName, notes.",
-                "If a value is missing, return null.",
-              ].join(" "),
-            },
-            {
-              inline_data: {
-                mime_type: mimeType,
-                data: imageBase64,
-              },
-            },
-          ],
-        },
-      ],
-      generationConfig: {
-        temperature: 0.1,
-        maxOutputTokens: 400,
-        responseMimeType: "application/json",
-      },
-    });
-    const rawText = extractCandidateText(data);
-
-    if (!rawText) {
-      throw new Error(data.error?.message ?? "Gemini returned an empty salary slip parse.");
-    }
-
-    try {
-      return JSON.parse(stripJsonFence(rawText)) as SalarySlipParseResult;
-    } catch (error) {
-      console.warn("[GeminiService] Salary slip parse JSON failed", error);
-      throw new Error("Unable to read the salary slip cleanly. Please fill the numbers manually.");
-    }
+    return OCRService.parseSalarySlip(imageBase64, mimeType);
   },
 
   async parseForm16Image(imageBase64: string, mimeType = "image/jpeg") {
+    return OCRService.parseForm16(imageBase64, mimeType);
+  },
+
+  async parseCAMSStatement(imageBase64: string, mimeType = "image/jpeg") {
+    return OCRService.parseCAMS(imageBase64, mimeType);
+  },
+
+  async getPortfolioRebalancingPlan(
+    profile: UserProfileData,
+    xray: import("../models/UserProfile").PortfolioXRay
+  ): Promise<string> {
     const data = await requestGemini({
+      system_instruction: {
+        parts: [{ text: buildSystemInstruction(profile) }],
+      },
       contents: [
         {
           role: "user",
           parts: [
             {
               text: [
-                "Read this Indian Form 16, tax statement, or salary structure screenshot and return strict JSON only.",
-                "Use numeric rupee amounts without commas.",
-                "Return keys: name, employerName, annualIncome, basicSalary, annualHRAReceived, annualPF, annual80C, annualNPS, taxDeducted, notes.",
-                "If a value is missing, return null.",
-                "annualIncome should be gross annual salary when visible.",
-                "basicSalary should be annual basic pay when visible.",
-              ].join(" "),
-            },
-            {
-              inline_data: {
-                mime_type: mimeType,
-                data: imageBase64,
-              },
+                "Write exactly 3 distinct, actionable bullet points for a personalized mutual fund rebalancing plan.",
+                "Stay under 150 words total. Do NOT use markdown bolding or formatting bullet asterisks, just write '1. ', '2. ', '3. '.",
+                "The user's current holdings are:",
+                xray.holdings.map(h => `- ${h.name} (${formatINR(h.currentValue)} in ${h.category})`).join("\n"),
+                `Their overall XIRR is ${xray.overallXIRR !== null ? xray.overallXIRR.toFixed(1) + '%' : 'unknown'}.`,
+                `They are losing a massive ${formatINR(xray.expenseRatioDrag)}/yr individually to active fund expense ratios vs an equivalent index fund.`,
+                xray.overlapPairs.length > 0 
+                  ? `Significant overlaps detected: ${xray.overlapPairs.map(o => `${o.fund1} & ${o.fund2} (${o.overlapLevel} overlap)`).join(', ')}.` 
+                  : "No high overlapping scheme pairs detected.",
+                "Provide highly specific fund-level advice: name the exact funds to consolidate, sell, or shift SIPs toward (e.g. telling them to sell the underperforming active flexi cap and move it to a low-cost NIFTY 50 index based on the numbers). Ensure your advice accurately reflects their risk profile and data.",
+              ].join("\n"),
             },
           ],
         },
       ],
       generationConfig: {
-        temperature: 0.1,
-        maxOutputTokens: 420,
-        responseMimeType: "application/json",
+        temperature: 0.6,
+        maxOutputTokens: 250,
       },
     });
-    const rawText = extractCandidateText(data);
 
-    if (!rawText) {
-      throw new Error(data.error?.message ?? "Gemini returned an empty Form 16 parse.");
+    const text = extractCandidateText(data);
+    if (!text) {
+      throw new Error(data.error?.message ?? "Gemini returned an empty rebalancing plan.");
     }
 
-    try {
-      return JSON.parse(stripJsonFence(rawText)) as Form16ParseResult;
-    } catch (error) {
-      console.warn("[GeminiService] Form 16 parse JSON failed", error);
-      throw new Error("Unable to read the Form 16 cleanly. Please enter the tax numbers manually.");
-    }
+    return text;
   },
 
   async getHealthImprovementTips(profile: UserProfileData) {
-    const data = await requestGemini({
-      system_instruction: {
-        parts: [{ text: buildSystemInstruction(profile) }],
-      },
-      contents: [
-        {
-          role: "user",
-          parts: [
-            {
-              text: [
-                "Return JSON only in the shape {\"tips\":[...]}",
-                "Give exactly 3 short, specific money-health improvement actions for this user.",
-                "Use the user's exact numbers where useful.",
-                "Keep each tip under 26 words.",
-                "Focus on the weakest health-score areas first.",
-              ].join(" "),
-            },
-          ],
-        },
-      ],
-      generationConfig: {
-        temperature: 0.4,
-        maxOutputTokens: 220,
-        responseMimeType: "application/json",
-      },
-    });
-    const rawText = extractCandidateText(data);
-
-    if (!rawText) {
-      throw new Error(data.error?.message ?? "Gemini returned empty health tips.");
-    }
-
-    try {
-      const parsed = JSON.parse(stripJsonFence(rawText)) as Partial<HealthTipResponse>;
-      const tips = Array.isArray(parsed.tips) ? parsed.tips.filter((tip): tip is string => typeof tip === "string") : [];
-
-      if (tips.length < 3) {
-        throw new Error("Gemini returned fewer than three health tips.");
-      }
-
-      return tips.slice(0, 3);
-    } catch (error) {
-      console.warn("[GeminiService] Health tip parse failed", error);
-      throw new Error("Unable to load AI improvement tips right now.");
-    }
+    return TemplateService.getHealthImprovementTips(profile);
   },
 
   async getFutureYouNarrative(profile: UserProfileData, input: FutureYouNarrativeInput) {
-    const scenarioSip = profile.monthlySIP * input.sipMultiplier;
-    const passiveIncome = getMonthlyPassiveIncome(input.projectedCorpus);
-
-    const data = await requestGemini({
-      system_instruction: {
-        parts: [{ text: buildSystemInstruction(profile) }],
-      },
-      contents: [
-        {
-          role: "user",
-          parts: [
-            {
-              text: [
-                "Explain this future-money scenario in exactly 2 short sentences.",
-                "Stay under 70 words total.",
-                "Be specific with the user's numbers and age.",
-                "Avoid markdown bullets.",
-                `Target age: ${input.targetAge}.`,
-                `Current SIP: ${formatINR(profile.monthlySIP)}.`,
-                `Scenario SIP: ${formatINR(scenarioSip)}.`,
-                `Assumed CAGR: ${(input.cagr * 100).toFixed(1)}%.`,
-                `Projected corpus: ${formatINR(input.projectedCorpus)}.`,
-                `FIRE target: ${formatINR(input.fireTarget)}.`,
-                `Estimated passive income at 4% rule: ${formatINR(passiveIncome)} per month.`,
-              ].join(" "),
-            },
-          ],
-        },
-      ],
-      generationConfig: {
-        temperature: 0.5,
-        maxOutputTokens: 160,
-      },
-    });
-    const text = extractCandidateText(data);
-
-    if (!text) {
-      throw new Error(data.error?.message ?? "Gemini returned an empty Future You narrative.");
-    }
-
-    return text;
+    return TemplateService.getFutureYouNarrative(profile, input);
   },
 
   async getTaxBattleNarrative(profile: UserProfileData, input: TaxBattleNarrativeInput) {
-    const data = await requestGemini({
-      system_instruction: {
-        parts: [{ text: buildSystemInstruction(profile) }],
-      },
-      contents: [
-        {
-          role: "user",
-          parts: [
-            {
-              text: [
-                "Write exactly 2 short sentences about this tax comparison.",
-                "Stay under 70 words total.",
-                "Use the numbers provided and mention the winning regime.",
-                "No markdown bullets.",
-                `Annual salary: ${formatINR(input.annualIncome)}.`,
-                `Old regime tax: ${formatINR(input.oldTax)}.`,
-                `New regime tax: ${formatINR(input.newTax)}.`,
-                `Winner: ${input.betterRegime} regime.`,
-                `Tax saving: ${formatINR(input.taxSaving)}.`,
-              ].join(" "),
-            },
-          ],
-        },
-      ],
-      generationConfig: {
-        temperature: 0.4,
-        maxOutputTokens: 140,
-      },
-    });
-    const text = extractCandidateText(data);
-
-    if (!text) {
-      throw new Error(data.error?.message ?? "Gemini returned an empty tax narrative.");
-    }
-
-    return text;
+    return TemplateService.getTaxBattleNarrative(profile, input);
   },
 
   async getTaxWizardSummary(profile: UserProfileData, snapshot: TaxWizardSnapshot) {
@@ -490,62 +464,48 @@ export const GeminiService = {
   },
 
   async getLifeEventAdvice(profile: UserProfileData, event: LifeEventKey) {
+    return TemplateService.getLifeEventAdvice(profile, event);
+  },
+
+  async getJointOptimizationAdvice(
+    jointData: import("../models/UserProfile").JointProfileData,
+    optimization: import("../models/UserProfile").JointOptimizationResult
+  ): Promise<string> {
+    const { user, partner } = jointData;
+    const partnerName = partner?.name ?? "Partner";
+
     const data = await requestGemini({
-      system_instruction: {
-        parts: [{ text: buildSystemInstruction(profile) }],
-      },
+      system_instruction: { parts: [{ text: buildSystemInstruction(user) }] },
       contents: [
         {
           role: "user",
           parts: [
             {
               text: [
-                "Return JSON only in the shape {\"immediate\":[],\"soon\":[],\"longTerm\":[]}.",
-                "Give exactly 2 bullets in each section.",
-                "The event is:",
-                event,
-                "Immediate means 0-30 days, soon means 1-6 months, longTerm means beyond that.",
-                "Use the user's numbers where useful.",
-                "Keep each bullet under 24 words.",
+                "Write exactly 3 short, friendly sentences summarizing this joint optimization strategy for a couple.",
+                "Stay under 110 words total. No markdown bullets.",
+                "Mention who should claim HRA, the combined tax-free harvesting gain, and the home loan benefit if active.",
+                `User: ${user.name}. Partner: ${partnerName}.`,
+                `Combined Net Worth: ${formatINR(optimization.combinedNetWorth)}.`,
+                `HRA Recommendation: ${optimization.hraSuggestion.recommendedClaimer} to claim (saves ${formatINR(
+                  optimization.hraSuggestion.estimatedSaving
+                )}).`,
+                `Tax Harvesting: Book ${formatINR(optimization.taxHarvesting.totalTaxFreeGain)} combined gains tax-free.`,
+                optimization.homeLoanAdvice.estimatedTaxBenefit > 0
+                  ? `Home Loan Benefit: ${formatINR(optimization.homeLoanAdvice.estimatedTaxBenefit)} tax saving.`
+                  : "No joint home loan modeled.",
+                `SIP Strategy: ${optimization.sipSplits.reason}`,
               ].join(" "),
             },
           ],
         },
       ],
-      generationConfig: {
-        temperature: 0.55,
-        maxOutputTokens: 260,
-        responseMimeType: "application/json",
-      },
+      generationConfig: { temperature: 0.5, maxOutputTokens: 250 },
     });
-    const rawText = extractCandidateText(data);
 
-    if (!rawText) {
-      throw new Error(data.error?.message ?? "Gemini returned empty life-event advice.");
-    }
-
-    try {
-      const parsed = JSON.parse(stripJsonFence(rawText)) as Partial<LifeEventAdviceResponse>;
-      const normalize = (value: unknown) =>
-        Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").slice(0, 2) : [];
-
-      const immediate = normalize(parsed.immediate);
-      const soon = normalize(parsed.soon);
-      const longTerm = normalize(parsed.longTerm);
-
-      if (immediate.length < 2 || soon.length < 2 || longTerm.length < 2) {
-        throw new Error("Gemini returned incomplete life-event advice.");
-      }
-
-      return {
-        immediate,
-        soon,
-        longTerm,
-      } satisfies LifeEventAdvice;
-    } catch (error) {
-      console.warn("[GeminiService] Life event parse failed", error);
-      throw new Error("Unable to load life-event advice right now.");
-    }
+    const text = extractCandidateText(data);
+    if (!text) throw new Error(data.error?.message ?? "Gemini returned an empty joint advice.");
+    return text;
   },
 
   scrubPII,

@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS user_profiles (
   goals TEXT[] DEFAULT ARRAY['retirement'],
   total_debt NUMERIC DEFAULT 0,
   onboarding_complete BOOLEAN DEFAULT FALSE,
+  cams_data JSONB DEFAULT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE(user_id)

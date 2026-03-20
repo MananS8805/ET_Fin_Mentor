@@ -18,6 +18,9 @@ import {
   getOverallHealthScore,
 } from "../../src/core/models/UserProfile";
 import { GeminiService } from "../../src/core/services/GeminiService";
+import { HealthScoreService, HealthScoreSnapshot } from "../../src/core/services/HealthScoreService";
+import { VictoryLine, VictoryChart, VictoryAxis, VictoryTheme } from "victory-native";
+import { useWindowDimensions } from "react-native";
 import { useAppStore } from "../../src/core/services/store";
 import { Colors, Radius, Spacing, Typography } from "../../src/core/theme";
 
@@ -83,7 +86,7 @@ function EmptyState() {
   return (
     <Screen scroll>
       <View style={styles.hero}>
-        <Text style={styles.eyebrow}>Day 3</Text>
+        {/* Removed Day 3 */}
         <Text style={styles.title}>Money Health Score</Text>
         <Text style={styles.subtitle}>
           Finish onboarding first so the app has enough financial context to calculate your 6-dimension score.
@@ -110,6 +113,18 @@ export default function HealthScoreScreen() {
   const [tipsLoading, setTipsLoading] = useState(false);
   const [tipsError, setTipsError] = useState("");
   const [sharing, setSharing] = useState(false);
+  const [scoreHistory, setScoreHistory] = useState<HealthScoreSnapshot[]>([]);
+const { width } = useWindowDimensions();
+const chartWidth = Math.max(300, width - Spacing["3xl"] * 2);
+
+// Save this month's score and load history on mount
+useEffect(() => {
+  if (!profile) return;
+  void (async () => {
+    const history = await HealthScoreService.saveScore(profile);
+    setScoreHistory(history);
+  })();
+}, [profile]);
 
   const score = profile ? getOverallHealthScore(profile) : 0;
   const category = getHealthScoreCategory(score);
@@ -200,7 +215,7 @@ export default function HealthScoreScreen() {
   return (
     <Screen scroll>
       <Animatable.View animation="fadeInUp" duration={500} style={styles.hero}>
-        <Text style={styles.eyebrow}>Day 3</Text>
+        {/* Removed Day 3 */}
         <Text style={styles.title}>Money Health Score</Text>
         <Text style={styles.subtitle}>
           Your overall score blends emergency readiness, protection, investing, debt, tax efficiency, and retirement
@@ -217,7 +232,50 @@ export default function HealthScoreScreen() {
 
         <Text style={styles.categoryDescription}>{categoryMeta.description}</Text>
       </Animatable.View>
-
+      {scoreHistory.length >= 2 ? (
+  <Animatable.View animation="fadeInUp" delay={140} duration={500} style={styles.section}>
+    <Text style={styles.sectionTitle}>Score history</Text>
+    <View style={styles.chartCard}>
+      <VictoryChart
+        height={120}
+        padding={{ top: 16, bottom: 32, left: 48, right: 16 }}
+        theme={VictoryTheme.material}
+        width={chartWidth}
+      >
+        <VictoryAxis
+          style={{
+            axis: { stroke: Colors.border },
+            grid: { stroke: "transparent" },
+            tickLabels: {
+              fill: Colors.textSecondary,
+              fontFamily: Typography.fontFamily.body,
+              fontSize: 10,
+            },
+          }}
+          tickFormat={(t: string) => t.slice(5)} // "MM" only
+        />
+        <VictoryAxis
+          dependentAxis
+          domain={[0, 100]}
+          style={{
+            axis: { stroke: "transparent" },
+            grid: { stroke: "#E8EDF4" },
+            tickLabels: {
+              fill: Colors.textSecondary,
+              fontFamily: Typography.fontFamily.body,
+              fontSize: 10,
+            },
+          }}
+        />
+        <VictoryLine
+          data={scoreHistory.map((s) => ({ x: s.monthKey, y: s.score }))}
+          interpolation="monotoneX"
+          style={{ data: { stroke: Colors.gold, strokeWidth: 2.5 } }}
+        />
+      </VictoryChart>
+    </View>
+  </Animatable.View>
+) : null}
       <Animatable.View animation="fadeInUp" delay={180} duration={500} style={styles.section}>
         <Text style={styles.sectionTitle}>6 score dimensions</Text>
         <View style={styles.dimensionsWrap}>
@@ -524,4 +582,12 @@ const styles = StyleSheet.create({
     fontSize: Typography.size.md,
     lineHeight: 24,
   },
+  chartCard: {
+  backgroundColor: Colors.card,
+  borderRadius: Radius.lg,
+  borderWidth: 0.5,
+  borderColor: Colors.border,
+  overflow: "hidden",
+  paddingVertical: Spacing.sm,
+},
 });

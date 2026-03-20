@@ -1,17 +1,17 @@
 import { Platform, TextStyle, ViewStyle } from "react-native";
 
 export const Colors = {
-  navy: "#0C2340",
-  gold: "#F5A623",
-  teal: "#1D9E75",
-  red: "#E24B4A",
-  purple: "#7F77DD",
-  surface: "#F6F7F9",
-  card: "#FFFFFF",
-  border: "#E5E7EB",
-  textPrimary: "#111827",
-  textSecondary: "#6B7280",
-  textMuted: "#9CA3AF",
+  navy: "#0A0A0A", // Deep dark background for headers
+  gold: "#D4AF37", // Premium gold
+  teal: "#00B852", // ET Money Emerald Green!
+  red: "#FF3B30",
+  purple: "#8B5CF6",
+  surface: "#121212", // Pure dark background
+  card: "#1E1E1E", // Slightly lighter to pop
+  border: "#333333", // Subtle separators
+  textPrimary: "#FFFFFF", // Sharp white
+  textSecondary: "#A3A3A3", // Recessed grey
+  textMuted: "#666666",
   white: "#FFFFFF",
   black: "#000000",
 } as const;
@@ -35,7 +35,6 @@ export const Spacing = {
 
 export const Typography = {
   fontFamily: {
-    // Safe fallback fonts until the real Syne and DM Sans files are added to assets/fonts.
     display: Platform.select({
       ios: "AvenirNext-Bold",
       android: "sans-serif-condensed",
@@ -92,11 +91,15 @@ export const ComponentStyles = {
     borderColor: Colors.border,
     padding: Spacing.lg,
     elevation: 2,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
   } satisfies ViewStyle,
   primaryButton: {
     height: 52,
     borderRadius: Radius.full,
-    backgroundColor: Colors.gold,
+    backgroundColor: Colors.teal, // ET Money Emerald Green
     alignItems: "center",
     justifyContent: "center",
   } satisfies ViewStyle,
@@ -105,7 +108,7 @@ export const ComponentStyles = {
     borderRadius: Radius.full,
     borderWidth: 0.5,
     borderColor: Colors.border,
-    backgroundColor: Colors.white,
+    backgroundColor: "transparent",
     alignItems: "center",
     justifyContent: "center",
   } satisfies ViewStyle,
@@ -113,7 +116,7 @@ export const ComponentStyles = {
     borderWidth: 0.5,
     borderColor: Colors.border,
     borderRadius: Radius.md,
-    backgroundColor: Colors.white,
+    backgroundColor: Colors.card,
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
     color: Colors.textPrimary,

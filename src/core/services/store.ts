@@ -1,7 +1,12 @@
 import { Session } from "@supabase/supabase-js";
 import { create } from "zustand";
 
-import { DemoPersonaKey, UserProfileData, getDemoProfile } from "../models/UserProfile";
+import {
+  DemoPersonaKey,
+  PortfolioXRay,
+  UserProfileData,
+  getDemoProfile,
+} from "../models/UserProfile";
 import { ChatMessage, GeminiService } from "./GeminiService";
 
 type AuthStatus = "idle" | "loading" | "authenticated" | "unauthenticated";
@@ -13,6 +18,8 @@ interface AppState {
   demoMode: boolean;
   demoPersona: DemoPersonaKey | null;
   chatHistory: ChatMessage[];
+  portfolioXRay: PortfolioXRay | null;
+  jointProfile: import("../models/UserProfile").JointProfileData | null;
   setAuthStatus: (status: AuthStatus) => void;
   setSession: (session: Session | null) => void;
   setCurrentProfile: (profile: UserProfileData | null) => void;
@@ -21,6 +28,8 @@ interface AppState {
   addChatMessage: (message: ChatMessage) => void;
   setChatHistory: (history: ChatMessage[]) => void;
   clearChatHistory: () => void;
+  setPortfolioXRay: (xray: PortfolioXRay | null) => void;
+  setJointProfile: (jointProfile: import("../models/UserProfile").JointProfileData | null) => void;
   reset: () => void;
 }
 
@@ -31,55 +40,69 @@ const initialState = {
   demoMode: false,
   demoPersona: null as DemoPersonaKey | null,
   chatHistory: [] as ChatMessage[],
+  portfolioXRay: null as PortfolioXRay | null,
+  jointProfile: null as import("../models/UserProfile").JointProfileData | null,
 };
 
 export const useAppStore = create<AppState>((set) => ({
   ...initialState,
+
   setAuthStatus: (authStatus) => set({ authStatus }),
+
   setSession: (session) =>
     set({
       session,
       authStatus: session ? "authenticated" : "unauthenticated",
     }),
+
   setCurrentProfile: (currentProfile) => set({ currentProfile }),
-  setDemoMode: (enabled, persona = null) =>
-    {
-      GeminiService.clearHistory();
-      set({
-        demoMode: enabled,
-        demoPersona: enabled && persona ? persona : null,
-        currentProfile: enabled && persona ? getDemoProfile(persona) : null,
-        session: enabled ? null : initialState.session,
-        authStatus: enabled ? "authenticated" : "unauthenticated",
-        chatHistory: [],
-      });
-    },
-  selectDemoPersona: (persona) =>
-    {
-      GeminiService.clearHistory();
-      set({
-        demoMode: true,
-        demoPersona: persona,
-        currentProfile: getDemoProfile(persona),
-        authStatus: "authenticated",
-        chatHistory: [],
-      });
-    },
+
+  setDemoMode: (enabled, persona = null) => {
+    GeminiService.clearHistory();
+    set({
+      demoMode: enabled,
+      demoPersona: enabled && persona ? persona : null,
+      currentProfile: enabled && persona ? getDemoProfile(persona) : null,
+      session: enabled ? null : initialState.session,
+      authStatus: enabled ? "authenticated" : "unauthenticated",
+      chatHistory: [],
+      portfolioXRay: null,
+    });
+  },
+
+  selectDemoPersona: (persona) => {
+    GeminiService.clearHistory();
+    set({
+      demoMode: true,
+      demoPersona: persona,
+      currentProfile: getDemoProfile(persona),
+      authStatus: "authenticated",
+      chatHistory: [],
+      portfolioXRay: null,
+    });
+  },
+
   addChatMessage: (message) =>
     set((state) => ({
       chatHistory: [...state.chatHistory, message],
     })),
+
   setChatHistory: (chatHistory) => set({ chatHistory }),
+
   clearChatHistory: () => {
     GeminiService.clearHistory();
     set({ chatHistory: [] });
   },
-  reset: () =>
-    {
-      GeminiService.clearHistory();
-      set({
-        ...initialState,
-        authStatus: "unauthenticated",
-      });
-    },
+
+  setPortfolioXRay: (portfolioXRay) => set({ portfolioXRay }),
+
+  setJointProfile: (jointProfile) => set({ jointProfile }),
+
+  reset: () => {
+    GeminiService.clearHistory();
+    set({
+      ...initialState,
+      authStatus: "unauthenticated",
+    });
+  },
 }));

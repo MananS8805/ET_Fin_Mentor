@@ -19,9 +19,11 @@ import {
   UserProfileData,
   formatINR,
   getEmergencyFundMonths,
+  getFinancial911Alerts,
   getMonthlySavings,
 } from "../../src/core/models/UserProfile";
 import { ChatMessage, GeminiService } from "../../src/core/services/GeminiService";
+import { AlertService } from "../../src/core/services/AlertService";
 import { useAppStore } from "../../src/core/services/store";
 import { Colors, Radius, Spacing, Typography } from "../../src/core/theme";
 
@@ -33,6 +35,8 @@ const QUICK_REPLIES = [
   "How close am I to FIRE?",
   "Where should my SIP go?",
 ] as const;
+
+
 
 function buildWelcomeMessage(profile: UserProfileData) {
   const monthlySavings = getMonthlySavings(profile);
@@ -73,7 +77,7 @@ function EmptyChatState() {
   return (
     <Screen scroll>
       <View style={styles.hero}>
-        <Text style={styles.eyebrow}>Day 4</Text>
+        {/* Removed Day 4 */}
         <Text style={styles.title}>Money Chat</Text>
         <Text style={styles.subtitle}>
           Finish onboarding first so FinMentor can answer with your actual numbers and context.
@@ -97,11 +101,25 @@ export default function ChatTab() {
   const chatHistory = useAppStore((state) => state.chatHistory);
   const setChatHistory = useAppStore((state) => state.setChatHistory);
   const clearChatHistory = useAppStore((state) => state.clearChatHistory);
-
+  const alertChip = useMemo(() => {
+  if (!profile) return null;
+  const alerts = getFinancial911Alerts(profile);
+  const critical = alerts.find((a) => a.priority === "critical");
+  if (!critical) return null;
+  const questionMap: Record<string, string> = {
+    emergency_low: "Why is my emergency fund critical?",
+    insurance_gap_high: "How do I fix my insurance gap?",
+    health_cover_missing: "Why do I need health insurance?",
+    debt_ratio_high: "How do I reduce my debt burden?",
+    retirement_corpus_low: "How far am I from retirement readiness?",
+  };
+  return questionMap[critical.id] ?? `Tell me about: ${critical.title}`;
+}, [profile]);
   const listRef = useRef<FlatList<ChatMessage>>(null);
 
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [streamingText, setStreamingText] = useState("");
   const [sessionExpired, setSessionExpired] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -119,12 +137,25 @@ export default function ChatTab() {
     }, 60);
 
     return () => clearTimeout(timer);
-  }, [chatHistory, sending]);
+  }, [chatHistory, sending, streamingText]);
 
-  const visibleMessages = useMemo(
-    () => (sending ? [...chatHistory, GeminiService.createModelMessage("...", "system")] : chatHistory),
-    [chatHistory, sending]
-  );
+
+const visibleMessages = useMemo(() => {
+  if (!sending) return chatHistory;
+  // While streaming: last message in chatHistory IS the live bubble —
+  // override its text with the accumulating streamingText
+  if (streamingText && chatHistory.length > 0) {
+    const last = chatHistory[chatHistory.length - 1];
+    if (last.role === "model") {
+      return [
+        ...chatHistory.slice(0, -1),
+        { ...last, text: streamingText },
+      ];
+    }
+  }
+  // Before first chunk: show the 3-dot typing indicator as before
+  return [...chatHistory, GeminiService.createModelMessage("...", "system")];
+}, [chatHistory, sending, streamingText]);
 
   if (!profile) {
     return <EmptyChatState />;
@@ -140,37 +171,51 @@ export default function ChatTab() {
   }
 
   async function handleSend(textOverride?: string) {
-    const trimmed = (textOverride ?? input).trim();
+  const trimmed = (textOverride ?? input).trim();
+  if (!trimmed || sending) return;
 
-    if (!trimmed || sending) {
-      return;
-    }
+  const optimisticHistory = [...chatHistory, GeminiService.createUserMessage(trimmed)];
+  setInput("");
+  setSending(true);
+  setSessionExpired(false);
+  setStreamingText("");          // reset streaming buffer
+  setChatHistory(optimisticHistory);
 
-    const optimisticHistory = [...chatHistory, GeminiService.createUserMessage(trimmed)];
+  try {
+    // Push an empty model bubble immediately so the user sees it
+    const placeholderId = `stream-${Date.now()}`;
+    const placeholder = { ...GeminiService.createModelMessage(""), id: placeholderId };
+    setChatHistory([...optimisticHistory, placeholder]);
 
-    setInput("");
-    setSending(true);
-    setSessionExpired(false);
-    setChatHistory(optimisticHistory);
+    let accumulated = "";
+    const { userMessage, modelMessage } = await GeminiService.streamMessage(
+      trimmed,
+      currentProfile,
+      (delta) => {
+        accumulated += delta;
+        setStreamingText(accumulated);          // triggers re-render of the last bubble
+      },
+      chatHistory
+    );
 
-    try {
-      const result = await GeminiService.sendMessage(trimmed, currentProfile, chatHistory);
-      setChatHistory(result.history);
-    } catch (error) {
-      const isAuthError = error instanceof Error && error.message === "AUTH_REQUIRED";
-      const fallbackMessage = GeminiService.createModelMessage(
-        isAuthError
-          ? "Session expired. Please sign in again to continue this conversation."
-          : "I could not answer that right now. Please try again in a moment.",
-        isAuthError ? "error" : "system"
-      );
-
-      setChatHistory([...optimisticHistory, fallbackMessage]);
-      setSessionExpired(isAuthError);
-    } finally {
-      setSending(false);
-    }
+    // Replace placeholder with the fully committed message from GeminiService history
+    setChatHistory([...optimisticHistory, modelMessage]);
+    setStreamingText("");
+  } catch (error) {
+    const isAuthError = error instanceof Error && error.message === "AUTH_REQUIRED";
+    const fallbackMessage = GeminiService.createModelMessage(
+      isAuthError
+        ? "Session expired. Please sign in again to continue this conversation."
+        : "I could not answer that right now. Please try again in a moment.",
+      isAuthError ? "error" : "error"
+    );
+    if (isAuthError) setSessionExpired(true);
+    setChatHistory([...optimisticHistory, fallbackMessage]);
+    setStreamingText("");
+  } finally {
+    setSending(false);
   }
+}
 
   function renderQuickReplies() {
     if (chatHistory.length !== 1 || chatHistory[0]?.kind !== "welcome") {
@@ -179,6 +224,15 @@ export default function ChatTab() {
 
     return (
       <View style={styles.quickReplyWrap}>
+        {/* Alert nudge chip — shown first if a critical alert exists */}
+        {alertChip ? (
+          <Pressable
+            onPress={() => void handleSend(alertChip)}
+            style={[styles.quickReplyChip, { backgroundColor: "#FFF1F1", borderColor: "#F1C5C5" }]}
+          >
+            <Text style={[styles.quickReplyLabel, { color: Colors.red }]}>{alertChip}</Text>
+          </Pressable>
+        ) : null}
         {QUICK_REPLIES.map((item) => (
           <Pressable key={item} onPress={() => void handleSend(item)} style={styles.quickReplyChip}>
             <Text style={styles.quickReplyLabel}>{item}</Text>

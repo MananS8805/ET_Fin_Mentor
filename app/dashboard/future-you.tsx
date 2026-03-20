@@ -4,7 +4,7 @@ import { router } from "expo-router";
 import * as Animatable from "react-native-animatable";
 import * as Sharing from "expo-sharing";
 import ViewShot from "react-native-view-shot";
-import { VictoryAxis, VictoryBar, VictoryChart, VictoryTheme } from "victory-native";
+import { VictoryAxis, VictoryBar, VictoryChart, VictoryLine, VictoryArea, VictoryTheme } from "victory-native";
 
 import { AnimatedCurrencyValue } from "../../src/components/AnimatedCurrencyValue";
 import { Button } from "../../src/components/Button";
@@ -36,7 +36,7 @@ function EmptyState() {
   return (
     <Screen scroll>
       <View style={styles.hero}>
-        <Text style={styles.eyebrow}>Day 5</Text>
+        {/* Removed Day 5 */}
         <Text style={styles.title}>Future You Mirror</Text>
         <Text style={styles.subtitle}>
           Finish onboarding first so the app can project your future corpus using your real SIP, corpus, retirement
@@ -148,6 +148,7 @@ export default function FutureYouTab() {
 
   useEffect(() => {
     if (!currentProfile) {
+      setNarrative("");
       return;
     }
 
@@ -158,6 +159,7 @@ export default function FutureYouTab() {
         try {
           setNarrativeLoading(true);
           setNarrativeError("");
+          
           const nextNarrative = await GeminiService.getFutureYouNarrative(currentProfile, {
             targetAge: selectedAge,
             sipMultiplier,
@@ -168,11 +170,21 @@ export default function FutureYouTab() {
 
           if (active) {
             setNarrative(nextNarrative);
+            setNarrativeError("");
           }
         } catch (error) {
           if (active) {
-            setNarrative(fallbackNarrative);
-            setNarrativeError(error instanceof Error ? error.message : "Showing offline narrative for now.");
+            // On error, use fallback and show error message
+            const fallback = getFutureYouFallbackNarrative(
+              currentProfile,
+              selectedAge,
+              projectedCorpus,
+              fireTarget,
+              sipMultiplier,
+              cagr
+            );
+            setNarrative(fallback);
+            setNarrativeError(error instanceof Error ? error.message : "Unable to generate AI narrative. Showing default instead.");
           }
         } finally {
           if (active) {
@@ -186,7 +198,7 @@ export default function FutureYouTab() {
       active = false;
       clearTimeout(timer);
     };
-  }, [cagr, currentProfile, fallbackNarrative, fireTarget, projectedCorpus, selectedAge, sipMultiplier]);
+  }, [currentProfile, selectedAge, sipMultiplier, cagr, projectedCorpus, fireTarget]);
 
   if (!currentProfile) {
     return <EmptyState />;
@@ -231,7 +243,7 @@ export default function FutureYouTab() {
   return (
     <Screen scroll>
       <Animatable.View animation="fadeInUp" duration={500} style={styles.hero}>
-        <Text style={styles.eyebrow}>Day 5</Text>
+        {/* Removed Day 5 */}
         <Text style={styles.title}>Future You Mirror</Text>
         <Text style={styles.subtitle}>
           Drag ahead in time, stress-test your SIP, and see how close this path gets you to financial independence.
@@ -244,9 +256,11 @@ export default function FutureYouTab() {
             <Text style={styles.projectionLabel}>Projected net worth at age {selectedAge}</Text>
             <AnimatedCurrencyValue style={styles.projectionValue} value={projectedCorpus} />
           </View>
+          
           <Text style={[styles.statusBadge, fireAchieved ? styles.statusBadgeSuccess : styles.statusBadgeBuilding]}>
             {fireAchieved ? "FIRE achieved" : "Building towards FIRE"}
           </Text>
+          
         </View>
 
         <View style={styles.metricRow}>
@@ -323,6 +337,7 @@ export default function FutureYouTab() {
           <Text style={styles.chartBody}>
             Every bar is a future age checkpoint. The selected age is highlighted in gold.
           </Text>
+
           <VictoryChart
             domainPadding={{ x: 18, y: 22 }}
             height={260}
@@ -366,6 +381,13 @@ export default function FutureYouTab() {
               x="age"
               y="corpus"
             />
+            
+            <VictoryLine
+  data={chartData.map((d) => ({ age: d.age, target: fireTarget }))}
+  style={{ data: { stroke: Colors.red, strokeDasharray: "6,4", strokeWidth: 1.5, opacity: 0.7 } }}
+  x="age"
+  y="target"
+/>
           </VictoryChart>
         </View>
       </Animatable.View>

@@ -63,15 +63,7 @@ function clearFailures(key: string): void {
   attemptTracker.delete(key);
 }
 
-function normalizePhone(rawPhone: string): string {
-  const digits = rawPhone.replace(/\D/g, "");
-
-  if (digits.length !== 10) {
-    throw new Error("Please enter a valid 10-digit Indian mobile number.");
-  }
-
-  return `+91${digits}`;
-}
+import { normalizePhone } from "../utils/phone";
 
 function normalizeEmail(rawEmail: string): string {
   const email = rawEmail.trim().toLowerCase();
@@ -304,5 +296,6 @@ export const AuthService = {
     await SecureStore.deleteItemAsync(StorageKeys.dismissedAlerts, SECURE_STORE_OPTIONS);
     await SecureStore.deleteItemAsync(StorageKeys.alertNotificationSignature, SECURE_STORE_OPTIONS);
     await SecureStore.deleteItemAsync(StorageKeys.sipLogs, SECURE_STORE_OPTIONS);
+    await SecureStore.deleteItemAsync(StorageKeys.healthScoreHistory, SECURE_STORE_OPTIONS);
   },
 };

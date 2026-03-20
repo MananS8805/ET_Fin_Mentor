@@ -46,7 +46,7 @@ function EmptyState() {
   return (
     <Screen scroll>
       <View style={styles.hero}>
-        <Text style={styles.eyebrow}>Day 7</Text>
+        {/* Removed Day 7 */}
         <Text style={styles.title}>Voice Check-in + Financial 911</Text>
         <Text style={styles.subtitle}>
           Finish onboarding first so voice replies and alerts can use your actual savings, SIP, insurance, and debt
@@ -270,7 +270,7 @@ export default function VoiceAlertsScreen() {
   return (
     <Screen scroll>
       <View style={styles.hero}>
-        <Text style={styles.eyebrow}>Day 7</Text>
+        {/* Removed Day 7 */}
         <Text style={styles.title}>Voice Check-in + Financial 911</Text>
         <Text style={styles.subtitle}>
           Speak a money question aloud, get a spoken reply back, and review the highest-priority financial risks on the
