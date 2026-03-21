@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Animated, StyleSheet, Text, View } from "react-native";
+import { Easing, runOnJS, useAnimatedReaction, useSharedValue, withTiming } from "react-native-reanimated";
 import { PortfolioMetrics } from "../../../src/core/services/MutualFundService";
 import { Colors, Spacing, Typography } from "../../../src/core/theme";
 
@@ -14,6 +15,8 @@ interface AtAGlanceHeaderProps {
  */
 export function AtAGlanceHeader({ metrics, previousValue }: AtAGlanceHeaderProps) {
   const [changeAnimation] = useState(new Animated.Value(0));
+  const animatedPortfolioValue = useSharedValue(0);
+  const [displayPortfolioValue, setDisplayPortfolioValue] = useState(0);
 
   useEffect(() => {
     if (metrics) {
@@ -24,6 +27,25 @@ export function AtAGlanceHeader({ metrics, previousValue }: AtAGlanceHeaderProps
       }).start();
     }
   }, [metrics, changeAnimation]);
+
+  useEffect(() => {
+    if (!metrics) return;
+    animatedPortfolioValue.value = 0;
+    animatedPortfolioValue.value = withTiming(metrics.currentValue, {
+      duration: 1000,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, [animatedPortfolioValue, metrics]);
+
+  useAnimatedReaction(
+    () => Math.round(animatedPortfolioValue.value),
+    (next, prev) => {
+      if (next !== prev) {
+        runOnJS(setDisplayPortfolioValue)(next);
+      }
+    },
+    [animatedPortfolioValue]
+  );
 
   if (!metrics) {
     return (
@@ -54,16 +76,14 @@ export function AtAGlanceHeader({ metrics, previousValue }: AtAGlanceHeaderProps
       ? Colors.teal
       : metrics.xirr >= 8
         ? Colors.gold
-        : metrics.xirr >= 0
-          ? Colors.purple
-          : Colors.red;
+        : Colors.red;
 
   return (
     <View style={styles.container}>
       {/* Total Portfolio Value - Large Bold Display */}
       <View style={styles.heroSection}>
         <Text style={styles.labelSmall}>Total Portfolio Value</Text>
-        <Text style={styles.valueHuge}>{formatValue(metrics.currentValue)}</Text>
+        <Text style={styles.valueHuge}>{formatValue(displayPortfolioValue)}</Text>
 
         {/* Day's Change Section */}
         {dayChange !== null && dayChangePercent !== null && (
@@ -118,9 +138,12 @@ export function AtAGlanceHeader({ metrics, previousValue }: AtAGlanceHeaderProps
 
 const styles = StyleSheet.create({
   container: {
+    backgroundColor: "#0D1B35",
+    borderColor: "rgba(255,255,255,0.06)",
+    borderRadius: 20,
+    borderWidth: 0.5,
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.lg,
-    backgroundColor: Colors.surface,
   },
 
   heroSection: {
@@ -129,15 +152,17 @@ const styles = StyleSheet.create({
 
   labelSmall: {
     fontSize: Typography.size.xs,
-    color: Colors.textSecondary,
+    color: "rgba(255,255,255,0.45)",
     marginBottom: Spacing.sm,
     fontWeight: "500",
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
   },
 
   valueHuge: {
-    fontSize: 44,
+    color: "#FFFFFF",
+    fontSize: 40,
     fontWeight: "700",
-    color: Colors.textPrimary,
     marginBottom: Spacing.md,
   },
 
@@ -151,7 +176,6 @@ const styles = StyleSheet.create({
   },
 
   metricsGrid: {
-    display: "flex",
     flexDirection: "row",
     flexWrap: "wrap",
     gap: Spacing.md,
@@ -161,16 +185,16 @@ const styles = StyleSheet.create({
   metricCard: {
     flex: 1,
     minWidth: "48%",
-    backgroundColor: Colors.surface,
+    backgroundColor: "rgba(255,255,255,0.03)",
     borderRadius: 12,
     padding: Spacing.md,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    borderWidth: 0.5,
+    borderColor: "rgba(255,255,255,0.06)",
   },
 
   metricLabel: {
     fontSize: Typography.size.xs,
-    color: Colors.textSecondary,
+    color: "rgba(255,255,255,0.45)",
     marginBottom: Spacing.sm,
     fontWeight: "600",
     textTransform: "uppercase",
@@ -179,13 +203,13 @@ const styles = StyleSheet.create({
   metricValue: {
     fontSize: Typography.size.lg,
     fontWeight: "700",
-    color: Colors.textPrimary,
+    color: "#FFFFFF",
     marginBottom: Spacing.sm,
   },
 
   metricSubtext: {
     fontSize: 12,
-    color: Colors.textSecondary,
+    color: "rgba(255,255,255,0.4)",
   },
 
   gaugeContainer: {

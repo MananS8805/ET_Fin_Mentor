@@ -1,6 +1,7 @@
-import { ReactNode } from "react";
+import { ReactNode, useRef } from "react";
 import {
   ActivityIndicator,
+  Animated,
   GestureResponderEvent,
   Pressable,
   StyleProp,
@@ -8,13 +9,14 @@ import {
   Text,
   ViewStyle,
 } from "react-native";
+import * as Haptics from "expo-haptics";
 
-import { Colors, Radius, Spacing, Typography } from "../core/theme";
+import { Colors, Radius, Spacing, Typography, Shadows } from "../core/theme";
 
 type ButtonProps = {
   label: string;
   onPress: (event: GestureResponderEvent) => void;
-  variant?: "primary" | "secondary" | "ghost";
+  variant?: "primary" | "secondary" | "ghost" | "success" | "error";
   disabled?: boolean;
   loading?: boolean;
   icon?: ReactNode;
@@ -34,27 +36,68 @@ export function Button({
 }: ButtonProps) {
   const isPrimary = variant === "primary";
   const isGhost = variant === "ghost";
-  const textColor = isPrimary ? Colors.navy : isGhost ? Colors.gold : Colors.textPrimary;
+  const isSuccess = variant === "success";
+  const isError = variant === "error";
+
+  const scaleAnim = useRef(new Animated.Value(1)).current;
+
+  const handlePressIn = () => {
+    if (!disabled && !loading) {
+      Animated.spring(scaleAnim, {
+        toValue: 0.95,
+        useNativeDriver: true,
+      }).start();
+    }
+  };
+
+  const handlePressOut = () => {
+    Animated.spring(scaleAnim, {
+      toValue: 1,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const handlePress = (event: GestureResponderEvent) => {
+    if (disabled || loading) return;
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
+    onPress(event);
+  };
+
+  let textColor: string = Colors.textPrimary;
+  if (isPrimary) textColor = Colors.navy;
+  if (isGhost) textColor = Colors.gold;
+  if (isSuccess) textColor = Colors.navy;
+  if (isError) textColor = Colors.white;
 
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel || label}
-      disabled={disabled || loading}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.base,
-        isPrimary && styles.primary,
-        variant === "secondary" && styles.secondary,
-        isGhost && styles.ghost,
-        pressed && !disabled && !loading ? styles.pressed : null,
-        (disabled || loading) && styles.disabled,
-        style,
-      ]}
-    >
-      {loading ? <ActivityIndicator color={textColor} /> : icon}
-      <Text style={[styles.label, { color: textColor }]}>{label}</Text>
-    </Pressable>
+    <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel || label}
+        disabled={disabled || loading}
+        onPress={handlePress}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        style={({ pressed }) => [
+          styles.base,
+          isPrimary && styles.primary,
+          variant === "secondary" && styles.secondary,
+          isGhost && styles.ghost,
+          isSuccess && styles.success,
+          isError && styles.error,
+          pressed && !disabled && !loading ? styles.pressed : null,
+          (disabled || loading) && styles.disabled,
+          style,
+        ]}
+      >
+        {loading ? (
+          <ActivityIndicator color={textColor} size="small" />
+        ) : icon ? (
+          icon
+        ) : null}
+        <Text style={[styles.label, { color: textColor }]}>{label}</Text>
+      </Pressable>
+    </Animated.View>
   );
 }
 
@@ -70,23 +113,37 @@ const styles = StyleSheet.create({
   },
   primary: {
     backgroundColor: Colors.gold,
+    ...Shadows.md,
   },
   secondary: {
     backgroundColor: Colors.white,
-    borderWidth: 0.5,
-    borderColor: Colors.border,
+    borderWidth: 1.5,
+    borderColor: Colors.gold,
+    ...Shadows.sm,
   },
   ghost: {
     backgroundColor: "transparent",
+    borderWidth: 1,
+    borderColor: Colors.gold,
+  },
+  success: {
+    backgroundColor: Colors.success,
+    ...Shadows.md,
+  },
+  error: {
+    backgroundColor: Colors.error,
+    ...Shadows.md,
   },
   pressed: {
-    opacity: 0.85,
+    opacity: 0.92,
+    elevation: 3,
   },
   disabled: {
-    opacity: 0.55,
+    opacity: 0.5,
   },
   label: {
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.md,
+    fontWeight: "600",
   },
 });

@@ -1,3 +1,4 @@
+import { OLD_REGIME_SLABS_2025 as OLD_REGIME_SLABS, NEW_REGIME_SLABS_2025 as NEW_REGIME_SLABS } from "../config/tax";
 export type RiskProfile = "conservative" | "moderate" | "aggressive";
 export type TaxRegime = "old" | "new";
 export type DemoPersonaKey = "rohan" | "priya" | "vikram";
@@ -132,7 +133,8 @@ export interface MFHolding {
   nav: number;
   currentValue: number;
   purchaseValue: number;
-  xirr: number | null; // null if insufficient cashflow data
+  xirr: number | null; 
+  transactions?: Array<{ date: Date; amount: number }>;// null if insufficient cashflow data
 }
 
 export interface OverlapPair {
@@ -278,7 +280,7 @@ export interface JointOptimizationResult {
   };
 }
 
-import { OLD_REGIME_SLABS, NEW_REGIME_SLABS } from "../config/tax";
+
 
 const HEALTH_DIMENSION_LABELS: Record<HealthDimensionKey, string> = {
   emergency: "Emergency",

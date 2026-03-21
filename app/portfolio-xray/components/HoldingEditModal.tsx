@@ -8,7 +8,6 @@ import {
   ScrollView,
   Alert,
   Modal,
-  Switch,
   ActivityIndicator,
 } from "react-native";
 import { MFHolding } from "../../../src/core/models/UserProfile";
@@ -62,7 +61,6 @@ export function HoldingEditModal({
   const [currentValue, setCurrentValue] = useState(holding.currentValue.toString());
   const [purchaseValue, setPurchaseValue] = useState(holding.purchaseValue.toString());
   const [selectedCategory, setSelectedCategory] = useState(holding.category);
-  const [useManualCalculation, setUseManualCalculation] = useState(false);
   const [calcSuccess, setCalcSuccess] = useState(false);
 
   // Sync state when holding prop changes
@@ -77,7 +75,6 @@ export function HoldingEditModal({
       setCurrentValue(holding.currentValue.toString());
       setPurchaseValue(holding.purchaseValue.toString());
       setSelectedCategory(holding.category);
-      setUseManualCalculation(false);
     }
   }, [holding.id, isVisible]);
   useEffect(() => {
@@ -161,6 +158,14 @@ export function HoldingEditModal({
     } else {
       Alert.alert("Invalid Input", "Please enter valid Units and NAV values first.");
     }
+  };
+
+  // Filter negative signs and ensure only valid decimal numbers
+  const filterDecimalInput = (text: string): string => {
+    // Remove leading negative signs
+    const cleaned = text.replace(/^-+/, "");
+    // Allow only digits and a single decimal point
+    return cleaned.replace(/[^\d.]/g, "").split(".").slice(0, 2).join(".");
   };
 
   const handleApplySchemeDetails = () => {
@@ -300,7 +305,7 @@ export function HoldingEditModal({
                   <TextInput
                     style={styles.input}
                     value={units}
-                    onChangeText={setUnits}
+                    onChangeText={(text) => setUnits(filterDecimalInput(text))}
                     placeholder="0.00"
                     placeholderTextColor={Colors.textMuted}
                     keyboardType="decimal-pad"
@@ -311,7 +316,7 @@ export function HoldingEditModal({
                   <TextInput
                     style={styles.input}
                     value={nav}
-                    onChangeText={setNav}
+                    onChangeText={(text) => setNav(filterDecimalInput(text))}
                     placeholder="0.00"
                     placeholderTextColor={Colors.textMuted}
                     keyboardType="decimal-pad"
@@ -338,7 +343,7 @@ export function HoldingEditModal({
                   <TextInput
                     style={styles.input}
                     value={currentValue}
-                    onChangeText={setCurrentValue}
+                    onChangeText={(text) => setCurrentValue(filterDecimalInput(text))}
                     placeholder="0.00"
                     placeholderTextColor={Colors.textMuted}
                     keyboardType="decimal-pad"
@@ -349,7 +354,7 @@ export function HoldingEditModal({
                   <TextInput
                     style={styles.input}
                     value={purchaseValue}
-                    onChangeText={setPurchaseValue}
+                    onChangeText={(text) => setPurchaseValue(filterDecimalInput(text))}
                     placeholder="0.00"
                     placeholderTextColor={Colors.textMuted}
                     keyboardType="decimal-pad"
@@ -479,11 +484,18 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: "center",
     backgroundColor: Colors.surface,
+    elevation: 0,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
   },
 
   categoryButtonActive: {
     backgroundColor: Colors.navy,
     borderColor: Colors.navy,
+    elevation: 2,
+    shadowOpacity: 0.2,
   },
 
   categoryButtonText: {

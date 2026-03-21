@@ -643,10 +643,17 @@ const styles = StyleSheet.create({
     borderWidth: 0.5,
     borderColor: Colors.border,
     backgroundColor: Colors.white,
+    elevation: 0,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
   },
   chipActive: {
     borderColor: Colors.gold,
     backgroundColor: "#FFF4DB",
+    elevation: 2,
+    shadowOpacity: 0.15,
   },
   chipLabel: {
     color: Colors.textPrimary,

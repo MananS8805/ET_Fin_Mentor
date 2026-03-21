@@ -10,7 +10,7 @@ import { AuthService } from "../src/core/services/AuthService";
 import { ProfileService } from "../src/core/services/ProfileService";
 import { useAppStore } from "../src/core/services/store";
 import { Colors, Radius, Spacing, Typography } from "../src/core/theme";
-
+import * as SecureStore from "expo-secure-store";
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -30,6 +30,7 @@ export default function SplashRoute() {
     let mounted = true;
 
     async function bootstrap() {
+      
       try {
         reset();
         const [authState] = await Promise.all([AuthService.restoreSession(), delay(2000)]);
@@ -57,11 +58,24 @@ export default function SplashRoute() {
               router.replace("/auth");
               return;
             }
+        
           }
 
           setStatusMessage("Loading your financial profile...");
           const restoredProfile = await ProfileService.loadProfile(authState.session);
           setCurrentProfile(restoredProfile);
+          try {
+  const rawJoint = await SecureStore.getItemAsync(
+    "et_finmentor_joint_profile",
+    { keychainService: "et-finmentor" }
+  );
+  if (rawJoint) {
+    const jointProfile = JSON.parse(rawJoint);
+    useAppStore.getState().setJointProfile(jointProfile);
+  }
+} catch {
+  // Joint profile restore failed — not critical
+}
           router.replace("/dashboard");
           return;
         }
@@ -196,7 +210,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   subtitle: {
-    color: "rgba(255,255,255,0.76)",
+    color: "rgba(255,255,255,0.85)",
     fontFamily: Typography.fontFamily.body,
     fontSize: Typography.size.md,
     lineHeight: 24,
@@ -224,7 +238,7 @@ const styles = StyleSheet.create({
     fontSize: Typography.size.lg,
   },
   infoHint: {
-    color: "rgba(255,255,255,0.68)",
+    color: "rgba(255,255,255,0.75)",
     fontFamily: Typography.fontFamily.body,
     fontSize: Typography.size.sm,
     lineHeight: 22,

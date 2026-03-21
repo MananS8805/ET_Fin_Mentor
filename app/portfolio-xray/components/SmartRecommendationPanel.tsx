@@ -1,6 +1,5 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
-import { GeminiService } from "../../../src/core/services/GeminiService";
+import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { PortfolioMetrics } from "../../../src/core/services/MutualFundService";
 import { Colors, Spacing, Typography } from "../../../src/core/theme";
 
@@ -13,11 +12,6 @@ interface SmartRecommendationPanelProps {
   };
 }
 
-/**
- * Smart Recommendation Panel Component
- * Passes pre-calculated metrics JSON to Gemini for strategic recommendations
- * Displays AI-generated insights without performing any calculations
- */
 export function SmartRecommendationPanel({
   metrics,
   fundNames,
@@ -26,61 +20,16 @@ export function SmartRecommendationPanel({
   const [recommendations, setRecommendations] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fetched, setFetched] = useState(false);
 
-  // Build pre-calculated metrics JSON
-  const metricsJSON = useMemo(() => ({
-    summary: {
-      totalValue: metrics.reduce((sum, m) => sum + m.currentValue, 0),
-      totalInvested: metrics.reduce((sum, m) => sum + m.totalInvested, 0),
-      averageXIRR: metrics.length > 0 ? metrics.reduce((sum, m) => sum + m.xirr, 0) / metrics.length : 0,
-      totalExpenseDrag: metrics.reduce((sum, m) => sum + m.expenseDragAnnual, 0),
-    },
-    fundLevelMetrics: metrics.map((m, index) => ({
-      fund: fundNames[index] || `Fund ${index + 1}`,
-      xirr: m.xirr.toFixed(1),
-      absoluteReturn: m.absoluteReturn.toFixed(2),
-      totalReturn: m.totalReturn.toFixed(2),
-      expenseDrag: m.expenseDragAnnual.toFixed(2),
-    })),
-    overlap: overlapAnalysis
-      ? {
-          overlapPercentage: overlapAnalysis.overlapPercentage.toFixed(1),
-          commonSchemes: overlapAnalysis.commonSchemes,
-        }
-      : null,
-  }), [metrics, fundNames, overlapAnalysis]);
-
-  // Fetch recommendations from Gemini
-  const fetchRecommendations = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      // For now, create a mock recommendation response since GeminiService chat method
-      // may not be directly available. In production, integrate with proper API.
-      const mockRecommendations = [
-        `Consider consolidating ${fundNames.slice(0, 2).join(" and ")} - they show ${metricsJSON.overlap?.overlapPercentage || "significant"} overlap`,
-        `Switching high-expense funds to direct plans could save ${metricsJSON.summary.totalExpenseDrag.toFixed(0)} annually`,
-        "Review equity allocation and rebalance if any category drifts more than 10% from target",
-        "Schedule annual portfolio review to ensure alignment with goals and life changes",
-      ];
-
-      setRecommendations(mockRecommendations);
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Failed to fetch recommendations";
-      setError(errorMessage);
-      console.error("Error fetching recommendations:", err);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [fundNames, metricsJSON]);
-
-  // Auto-fetch recommendations on mount if metrics available
-  useEffect(() => {
-    if (metrics.length > 0) {
-      void fetchRecommendations();
-    }
-  }, [metrics.length, fetchRecommendations]);
+  const summary = useMemo(() => ({
+    totalValue: metrics.reduce((sum, m) => sum + m.currentValue, 0),
+    totalInvested: metrics.reduce((sum, m) => sum + m.totalInvested, 0),
+    averageXIRR: metrics.length > 0
+      ? metrics.reduce((sum, m) => sum + m.xirr, 0) / metrics.length
+      : 0,
+    totalExpenseDrag: metrics.reduce((sum, m) => sum + m.expenseDragAnnual, 0),
+  }), [metrics]);
 
   const formatter = new Intl.NumberFormat("en-IN", {
     style: "currency",
@@ -88,78 +37,170 @@ export function SmartRecommendationPanel({
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   });
+  const formatINR = (v: number) => formatter.format(v);
 
-  const formatINR = (value: number) => formatter.format(value);
+  const fetchRecommendations = useCallback(async () => {
+    if (metrics.length === 0) return;
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      // Build a compact prompt payload — no PII, pure numbers
+      const payload = {
+        funds: fundNames.map((name, i) => ({
+          name,
+          xirr: metrics[i]?.xirr?.toFixed(1) ?? "0",
+          expenseDrag: metrics[i]?.expenseDragAnnual?.toFixed(0) ?? "0",
+          absoluteReturn: metrics[i]?.absoluteReturn?.toFixed(1) ?? "0",
+        })),
+        portfolio: {
+          totalValue: summary.totalValue.toFixed(0),
+          averageXIRR: summary.averageXIRR.toFixed(1),
+          totalExpenseDrag: summary.totalExpenseDrag.toFixed(0),
+          overlapPct: overlapAnalysis?.overlapPercentage?.toFixed(1) ?? "0",
+          commonSchemes: overlapAnalysis?.commonSchemes ?? [],
+        },
+      };
+
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.EXPO_PUBLIC_GEMINI_API_KEY}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [
+              {
+                role: "user",
+                parts: [
+                  {
+                    text: [
+                      "You are a mutual fund advisor for Indian investors.",
+                      "Based on this portfolio data, give exactly 4 short actionable recommendations.",
+                      "Each recommendation must be one sentence, specific, and mention fund names or numbers where relevant.",
+                      "Return ONLY a JSON array of 4 strings. No markdown, no explanation, no preamble.",
+                      "Example format: [\"Sell X and move to Y index fund\", \"Your XIRR of Z% lags the benchmark\"]",
+                      "",
+                      `Portfolio data: ${JSON.stringify(payload)}`,
+                    ].join("\n"),
+                  },
+                ],
+              },
+            ],
+            generationConfig: { temperature: 0.5, maxOutputTokens: 400 },
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Gemini request failed: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const raw = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+      const cleaned = raw.replace(/```json/gi, "").replace(/```/g, "").trim();
+      const parsed = JSON.parse(cleaned) as string[];
+
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        throw new Error("Unexpected response format from Gemini.");
+      }
+
+      setRecommendations(parsed.slice(0, 4));
+      setFetched(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to fetch recommendations.");
+      // Fallback: build basic recommendations from the numbers we have
+      const fallback: string[] = [];
+      if (summary.totalExpenseDrag > 5000) {
+        fallback.push(`Switching to direct plans or index funds could recover ${formatINR(summary.totalExpenseDrag)} lost annually to expense ratios.`);
+      }
+      if (summary.averageXIRR < 10) {
+        fallback.push(`Your average XIRR of ${summary.averageXIRR.toFixed(1)}% is below the Nifty 50 benchmark — review underperforming funds.`);
+      }
+      if (overlapAnalysis && overlapAnalysis.overlapPercentage > 30) {
+        fallback.push(`${overlapAnalysis.overlapPercentage.toFixed(0)}% portfolio overlap detected — consolidate overlapping funds to reduce redundancy.`);
+      }
+      fallback.push("Review and rebalance your portfolio annually to stay aligned with your risk profile.");
+      setRecommendations(fallback);
+      setFetched(true);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [metrics, fundNames, overlapAnalysis, summary]);
+
+  useEffect(() => {
+    if (metrics.length > 0 && !fetched) {
+      void fetchRecommendations();
+    }
+  }, [metrics.length, fetched, fetchRecommendations]);
+
+  if (metrics.length === 0) return null;
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Smart Recommendations</Text>
+      <View style={styles.titleRow}>
+        <Text style={styles.title}>Smart recommendations</Text>
+        {fetched && !isLoading && (
+          <TouchableOpacity onPress={() => { setFetched(false); setRecommendations([]); }}>
+            <Text style={styles.refreshText}>Refresh</Text>
+          </TouchableOpacity>
+        )}
+      </View>
 
+      {/* Summary strip */}
+      <View style={styles.summaryCard}>
+        <View style={styles.summaryRow}>
+          <Text style={styles.summaryLabel}>Portfolio value</Text>
+          <Text style={styles.summaryValue}>{formatINR(summary.totalValue)}</Text>
+        </View>
+        <View style={styles.summaryRow}>
+          <Text style={styles.summaryLabel}>Avg XIRR</Text>
+          <Text style={[styles.summaryValue, { color: Colors.teal }]}>
+            {summary.averageXIRR.toFixed(1)}%
+          </Text>
+        </View>
+        <View style={styles.summaryRow}>
+          <Text style={styles.summaryLabel}>Annual expense drag</Text>
+          <Text style={[styles.summaryValue, { color: Colors.red }]}>
+            {formatINR(summary.totalExpenseDrag)}
+          </Text>
+        </View>
+        {overlapAnalysis && (
+          <View style={styles.summaryRow}>
+            <Text style={styles.summaryLabel}>Portfolio overlap</Text>
+            <Text style={[styles.summaryValue, { color: Colors.gold }]}>
+              {overlapAnalysis.overlapPercentage.toFixed(0)}%
+            </Text>
+          </View>
+        )}
+      </View>
+
+      {/* Recommendations */}
       {isLoading ? (
-        <View style={styles.centerContent}>
-          <ActivityIndicator size="large" color={Colors.navy} />
+        <View style={styles.loadingBox}>
+          <ActivityIndicator size="small" color={Colors.purple} />
           <Text style={styles.loadingText}>Analyzing your portfolio...</Text>
         </View>
       ) : error ? (
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorTitle}>Unable to Generate Recommendations</Text>
-          <Text style={styles.errorText}>{error}</Text>
-        </View>
-      ) : recommendations.length > 0 ? (
-        <View>
-          {/* Key Insights Summary */}
-          <View style={styles.summaryCard}>
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Portfolio Value</Text>
-              <Text style={styles.summaryValue}>{formatINR(metricsJSON.summary.totalValue)}</Text>
-            </View>
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Avg XIRR</Text>
-              <Text style={[styles.summaryValue, { color: Colors.teal }]}>
-                {metricsJSON.summary.averageXIRR.toFixed(1)}%
-              </Text>
-            </View>
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Annual Expense Drag</Text>
-              <Text style={[styles.summaryValue, { color: Colors.red }]}>
-                {formatINR(metricsJSON.summary.totalExpenseDrag)}
-              </Text>
-            </View>
-            {metricsJSON.overlap && (
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Portfolio Overlap</Text>
-                <Text style={[styles.summaryValue, { color: Colors.gold }]}>
-                  {metricsJSON.overlap.overlapPercentage}%
-                </Text>
-              </View>
-            )}
-          </View>
+        <Text style={styles.errorText}>Showing offline recommendations</Text>
+      ) : null}
 
-          {/* Recommendations List */}
-          <View style={styles.recommendationsContainer}>
-            <Text style={styles.recommendationsTitle}>AI-Generated Insights</Text>
-            {recommendations.map((recommendation, index) => (
-              <View key={index} style={styles.recommendationItem}>
-                <View style={styles.recommendationNumber}>
-                  <Text style={styles.recommendationNumberText}>{index + 1}</Text>
-                </View>
-                <Text style={styles.recommendationText}>{recommendation}</Text>
+      {recommendations.length > 0 && (
+        <View style={styles.recsContainer}>
+          <Text style={styles.recsTitle}>AI insights</Text>
+          {recommendations.map((rec, index) => (
+            <View key={index} style={styles.recItem}>
+              <View style={styles.recNumber}>
+                <Text style={styles.recNumberText}>{index + 1}</Text>
               </View>
-            ))}
-          </View>
-
-          {/* Disclaimer */}
-          <Text style={styles.disclaimer}>
-            💡 These recommendations are based on your portfolio metrics. Consult a financial advisor before making
-            investment decisions.
-          </Text>
-        </View>
-      ) : (
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>No recommendations available yet</Text>
-          <Text style={styles.emptySubtext}>Ensure your portfolio has complete data to generate insights</Text>
+              <Text style={styles.recText}>{rec}</Text>
+            </View>
+          ))}
         </View>
       )}
+
+      <Text style={styles.disclaimer}>
+        These recommendations are based on your portfolio metrics. Consult a financial advisor before making investment decisions.
+      </Text>
     </View>
   );
 }
@@ -170,55 +211,30 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.lg,
     backgroundColor: Colors.surface,
   },
-
-  title: {
-    fontSize: Typography.size["2xl"],
-    fontWeight: "700",
-    color: Colors.textPrimary,
-    marginBottom: Spacing.lg,
-  },
-
-  centerContent: {
-    justifyContent: "center",
+  titleRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
     alignItems: "center",
-    paddingVertical: Spacing.xl,
+    marginBottom: Spacing.md,
   },
-
-  loadingText: {
-    marginTop: Spacing.md,
-    fontSize: Typography.size.md,
-    color: Colors.textSecondary,
+  title: {
+    fontSize: Typography.size.xl,
+    fontFamily: Typography.fontFamily.display,
+    color: Colors.textPrimary,
   },
-
-  errorContainer: {
-    backgroundColor: Colors.surface,
-    borderLeftWidth: 4,
-    borderLeftColor: Colors.red,
-    borderRadius: 8,
-    padding: Spacing.md,
+  refreshText: {
+    fontSize: Typography.size.sm,
+    color: Colors.purple,
+    fontFamily: Typography.fontFamily.bodyMedium,
   },
-
-  errorTitle: {
-    fontSize: Typography.size.lg,
-    fontWeight: "600",
-    color: Colors.red,
-    marginBottom: Spacing.sm,
-  },
-
-  errorText: {
-    fontSize: Typography.size.md,
-    color: Colors.textSecondary,
-  },
-
   summaryCard: {
-    backgroundColor: Colors.surface,
+    backgroundColor: Colors.card,
     borderRadius: 12,
     padding: Spacing.md,
     marginBottom: Spacing.lg,
     borderWidth: 1,
     borderColor: Colors.border,
   },
-
   summaryRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -227,86 +243,77 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
-
   summaryLabel: {
     fontSize: Typography.size.xs,
     color: Colors.textSecondary,
-    fontWeight: "600",
+    fontFamily: Typography.fontFamily.bodyMedium,
   },
-
   summaryValue: {
     fontSize: Typography.size.md,
-    fontWeight: "700",
+    fontFamily: Typography.fontFamily.display,
     color: Colors.textPrimary,
   },
-
-  recommendationsContainer: {
+  loadingBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.md,
+    paddingVertical: Spacing.lg,
+  },
+  loadingText: {
+    fontSize: Typography.size.sm,
+    color: Colors.textSecondary,
+    fontFamily: Typography.fontFamily.body,
+  },
+  errorText: {
+    fontSize: Typography.size.sm,
+    color: Colors.gold,
+    fontFamily: Typography.fontFamily.bodyMedium,
+    marginBottom: Spacing.sm,
+  },
+  recsContainer: {
     marginBottom: Spacing.lg,
   },
-
-  recommendationsTitle: {
+  recsTitle: {
     fontSize: Typography.size.lg,
-    fontWeight: "700",
+    fontFamily: Typography.fontFamily.display,
     color: Colors.textPrimary,
     marginBottom: Spacing.md,
   },
-
-  recommendationItem: {
+  recItem: {
     flexDirection: "row",
     marginBottom: Spacing.md,
     alignItems: "flex-start",
   },
-
-  recommendationNumber: {
+  recNumber: {
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: Colors.navy,
+    backgroundColor: Colors.purple,
     justifyContent: "center",
     alignItems: "center",
     marginRight: Spacing.sm,
     marginTop: 2,
   },
-
-  recommendationNumberText: {
+  recNumberText: {
     color: "#FFFFFF",
-    fontWeight: "700",
+    fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: 12,
   },
-
-  recommendationText: {
+  recText: {
     flex: 1,
     fontSize: Typography.size.md,
     color: Colors.textSecondary,
-    lineHeight: 20,
+    fontFamily: Typography.fontFamily.body,
+    lineHeight: 22,
   },
-
   disclaimer: {
     fontSize: 12,
     color: Colors.textMuted,
-    fontStyle: "italic",
+    fontFamily: Typography.fontFamily.body,
     lineHeight: 16,
     marginTop: Spacing.md,
-    paddingHorizontal: Spacing.sm,
+    paddingLeft: Spacing.md,
     borderLeftWidth: 2,
     borderLeftColor: Colors.gold,
-    paddingLeft: Spacing.md,
-  },
-
-  emptyContainer: {
-    alignItems: "center",
-    paddingVertical: Spacing.xl,
-  },
-
-  emptyText: {
-    fontSize: Typography.size.md,
-    color: Colors.textSecondary,
-    fontWeight: "600",
-  },
-
-  emptySubtext: {
-    fontSize: 12,
-    color: Colors.textMuted,
-    marginTop: Spacing.sm,
   },
 });

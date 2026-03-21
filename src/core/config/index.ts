@@ -2,19 +2,20 @@ const ENV_KEYS = {
   supabaseUrl: "EXPO_PUBLIC_SUPABASE_URL",
   supabaseAnonKey: "EXPO_PUBLIC_SUPABASE_ANON_KEY",
   geminiApiKey: "EXPO_PUBLIC_GEMINI_API_KEY",
+  groqApiKey: "EXPO_PUBLIC_GROQ_API_KEY",
 } as const;
 
 type EnvKey = (typeof ENV_KEYS)[keyof typeof ENV_KEYS];
 
-function readEnv(key: EnvKey): string {
-  const value = process.env[key];
+function readEnv(key: EnvKey, required = false): string {
+  const value = process.env[key] || (global as any)[key];
 
-  if (!value) {
+  if (!value && required) {
     console.warn(`[AppConfig] Missing environment variable: ${key}`);
     return "";
   }
 
-  return value;
+  return value ?? "";
 }
 
 export const StorageKeys = {
@@ -30,9 +31,10 @@ healthScoreHistory: "et_finmentor_health_score_history",
 } as const;
 
 export const AppConfig = {
-  supabaseUrl: readEnv(ENV_KEYS.supabaseUrl),
-  supabaseAnonKey: readEnv(ENV_KEYS.supabaseAnonKey),
+  supabaseUrl: readEnv(ENV_KEYS.supabaseUrl, true),
+  supabaseAnonKey: readEnv(ENV_KEYS.supabaseAnonKey, true),
   geminiApiKey: readEnv(ENV_KEYS.geminiApiKey),
+  groqApiKey: readEnv(ENV_KEYS.groqApiKey),
   appName: "ET FinMentor",
   otpResendSeconds: 60,
   otpMaxAttempts: 3,
@@ -45,7 +47,10 @@ export const AppConfig = {
   isGeminiConfigured() {
     return Boolean(this.geminiApiKey);
   },
+  isGroqConfigured() {
+    return Boolean(this.groqApiKey);
+  },
   isFullyConfigured() {
-    return this.isSupabaseConfigured() && this.isGeminiConfigured();
+    return this.isSupabaseConfigured() && (this.isGeminiConfigured() || this.isGroqConfigured());
   },
 } as const;

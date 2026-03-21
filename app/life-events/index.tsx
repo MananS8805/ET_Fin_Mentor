@@ -1,10 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Pressable, StyleSheet, Text, View,TextInput } from "react-native";
+import { Alert, Pressable, StyleSheet, Text, View, TextInput } from "react-native";
 import { router } from "expo-router";
 import * as Sharing from "expo-sharing";
 import ViewShot from "react-native-view-shot";
 import ConfettiCannon from "react-native-confetti-cannon";
-
+import * as Animatable from "react-native-animatable";
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withRepeat,
+  withSequence,
+  withSpring,
+  withTiming,
+} from "react-native-reanimated";
 import { Button } from "../../src/components/Button";
 import { Screen } from "../../src/components/Screen";
 import { TypewriterText } from "../../src/components/TypewriterText";
@@ -23,11 +33,48 @@ import { SipStreakService } from "../../src/core/services/SipStreakService";
 import { useAppStore } from "../../src/core/services/store";
 import { Colors, Radius, Spacing, Typography } from "../../src/core/theme";
 
+function LoadingDots() {
+  const dot1 = useSharedValue(0);
+  const dot2 = useSharedValue(0);
+  const dot3 = useSharedValue(0);
+
+  useEffect(() => {
+    const animate = (dot: any, delay: number) => {
+      dot.value = withDelay(
+        delay,
+        withRepeat(
+          withSequence(
+            withTiming(1, { duration: 280, easing: Easing.out(Easing.cubic) }),
+            withTiming(0.25, { duration: 280, easing: Easing.in(Easing.cubic) })
+          ),
+          -1,
+          false
+        )
+      );
+    };
+
+    animate(dot1, 0);
+    animate(dot2, 120);
+    animate(dot3, 240);
+  }, [dot1, dot2, dot3]);
+
+  const s1 = useAnimatedStyle(() => ({ opacity: dot1.value }));
+  const s2 = useAnimatedStyle(() => ({ opacity: dot2.value }));
+  const s3 = useAnimatedStyle(() => ({ opacity: dot3.value }));
+
+  return (
+    <View style={styles.loadingDotsRow}>
+      <Animated.Text style={[styles.loadingDot, s1]}>.</Animated.Text>
+      <Animated.Text style={[styles.loadingDot, s2]}>.</Animated.Text>
+      <Animated.Text style={[styles.loadingDot, s3]}>.</Animated.Text>
+    </View>
+  );
+}
+
 function EmptyState() {
   return (
     <Screen scroll>
       <View style={styles.hero}>
-        {/* Removed Day 8 */}
         <Text style={styles.title}>Life Events + SIP Streak</Text>
         <Text style={styles.subtitle}>
           Finish onboarding first so event advice, streaks, and the monthly money card all use your real financial
@@ -47,13 +94,112 @@ function EmptyState() {
   );
 }
 
-function AdviceSection({ title, body, accent }: { title: string; body: string; accent: string }) {
+function AdviceSection({
+  title,
+  body,
+  accent,
+  index,
+}: {
+  title: string;
+  body: string;
+  accent: string;
+  index: number;
+}) {
+  const y = useSharedValue(12);
+  const opacity = useSharedValue(0);
+
+  useEffect(() => {
+    y.value = withDelay(index * 100, withTiming(0, { duration: 260, easing: Easing.out(Easing.cubic) }));
+    opacity.value = withDelay(index * 100, withTiming(1, { duration: 260, easing: Easing.out(Easing.cubic) }));
+  }, [index, opacity, y]);
+
+  const sectionAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+    transform: [{ translateY: y.value }],
+  }));
+
   return (
-    <View style={styles.adviceCard}>
-      <View style={[styles.adviceAccent, { backgroundColor: accent }]} />
-      <Text style={styles.adviceTitle}>{title}</Text>
-      <TypewriterText style={styles.adviceBody} text={body} />
-    </View>
+    <Animated.View style={[styles.adviceCard, sectionAnimatedStyle]}>
+      <View style={styles.adviceRow}>
+        <View style={[styles.adviceAccent, { backgroundColor: accent }]} />
+        <View style={styles.adviceCopyWrap}>
+          <Text style={styles.adviceTitle}>{title}</Text>
+          <TypewriterText style={styles.adviceBody} text={body} />
+        </View>
+      </View>
+    </Animated.View>
+  );
+}
+
+function EventOptionCard({
+  label,
+  helper,
+  selected,
+  onPress,
+}: {
+  label: string;
+  helper: string;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  const scale = useSharedValue(1);
+
+  const pressStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
+  return (
+    <Animated.View style={pressStyle}>
+      <Pressable
+        onPress={onPress}
+        onPressIn={() => {
+          scale.value = withSpring(0.97, { damping: 12, stiffness: 180 });
+        }}
+        onPressOut={() => {
+          scale.value = withSpring(1, { damping: 12, stiffness: 180 });
+        }}
+        style={[styles.eventCard, selected ? styles.eventCardActive : null]}
+      >
+        {selected ? <View style={styles.eventActiveAccent} /> : null}
+        <Text style={[styles.eventLabel, selected ? styles.eventLabelActive : null]}>{label}</Text>
+        <Text style={styles.eventHelper}>{helper}</Text>
+      </Pressable>
+    </Animated.View>
+  );
+}
+
+function CalendarMonthChip({
+  label,
+  logged,
+  isCurrent,
+}: {
+  label: string;
+  logged: boolean;
+  isCurrent: boolean;
+}) {
+  const scale = useSharedValue(logged ? 0.9 : 1);
+
+  const monthStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
+  useEffect(() => {
+    if (logged) {
+      scale.value = withSpring(1, { damping: 11, stiffness: 170 });
+    }
+  }, [logged, scale]);
+
+  return (
+    <Animated.View
+      style={[
+        styles.monthChip,
+        logged ? styles.monthChipLogged : null,
+        isCurrent ? styles.monthChipCurrent : null,
+        monthStyle,
+      ]}
+    >
+      <Text style={[styles.monthChipLabel, logged ? styles.monthChipLabelLogged : null]}>{label}</Text>
+    </Animated.View>
   );
 }
 
@@ -85,6 +231,18 @@ export default function LifeEventsScreen() {
   const [followUpInput, setFollowUpInput] = useState("");
 const [followUpReply, setFollowUpReply] = useState("");
 const [followUpLoading, setFollowUpLoading] = useState(false);
+  const heroY = useSharedValue(24);
+  const heroOpacity = useSharedValue(0);
+
+  useEffect(() => {
+    heroY.value = withTiming(0, { duration: 400, easing: Easing.out(Easing.cubic) });
+    heroOpacity.value = withTiming(1, { duration: 400, easing: Easing.out(Easing.cubic) });
+  }, [heroOpacity, heroY]);
+
+  const heroAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: heroOpacity.value,
+    transform: [{ translateY: heroY.value }],
+  }));
 
   useEffect(() => {
     let active = true;
@@ -202,13 +360,12 @@ const [followUpLoading, setFollowUpLoading] = useState(false);
     <Screen scroll>
       {confettiLevel ? <ConfettiCannon count={160} fadeOut origin={{ x: 180, y: 0 }} /> : null}
 
-      <View style={styles.hero}>
-        {/* Removed Day 8 */}
+      <Animated.View style={[styles.hero, heroAnimatedStyle]}>
         <Text style={styles.title}>Life Events + SIP Streak</Text>
         <Text style={styles.subtitle}>
           Pick a real-life money moment, get a structured plan back, and keep your SIP habit alive month after month.
         </Text>
-      </View>
+      </Animated.View>
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Life event advisor</Text>
@@ -217,14 +374,13 @@ const [followUpLoading, setFollowUpLoading] = useState(false);
             const selected = selectedEvent === event.key;
 
             return (
-              <Pressable
+              <EventOptionCard
+                helper={event.helper}
                 key={event.key}
+                label={event.label}
                 onPress={() => setSelectedEvent(event.key)}
-                style={[styles.eventCard, selected ? styles.eventCardActive : null]}
-              >
-                <Text style={[styles.eventLabel, selected ? styles.eventLabelActive : null]}>{event.label}</Text>
-                <Text style={styles.eventHelper}>{event.helper}</Text>
-              </Pressable>
+                selected={selected}
+              />
             );
           })}
         </View>
@@ -233,20 +389,67 @@ const [followUpLoading, setFollowUpLoading] = useState(false);
           <Text style={styles.responseTitle}>
             {LIFE_EVENT_OPTIONS.find((item) => item.key === selectedEvent)?.label} plan
           </Text>
-          {loadingAdvice ? <Text style={styles.loadingText}>FinMentor is typing your action plan...</Text> : null}
+          {loadingAdvice ? (
+            <View style={styles.loadingRow}>
+              <Text style={styles.loadingText}>FinMentor is typing</Text>
+              <LoadingDots />
+            </View>
+          ) : null}
           {adviceError ? <Text style={styles.warningText}>{adviceError}</Text> : null}
 
-          <AdviceSection accent={Colors.gold} body={immediateText} title="Immediate (0-30 days)" />
-          <AdviceSection accent={Colors.teal} body={soonText} title="Soon (1-6 months)" />
-          <AdviceSection accent={Colors.purple} body={longTermText} title="Long term" />
+          <AdviceSection accent={Colors.gold} body={immediateText} index={0} title="Immediate (0-30 days)" />
+          <AdviceSection accent={Colors.teal} body={soonText} index={1} title="Soon (1-6 months)" />
+          <AdviceSection accent={Colors.purple} body={longTermText} index={2} title="Long term" />
         </View>
+        {/* ── Follow-up Chat ── */}
+<View style={styles.followUpShell}>
+  <Text style={styles.followUpTitle}>Ask a follow-up</Text>
+  <Text style={styles.followUpSubtitle}>
+    Have a specific question about your {LIFE_EVENT_OPTIONS.find(e => e.key === selectedEvent)?.label.toLowerCase()} plan?
+  </Text>
+
+  <View style={styles.followUpInputRow}>
+    <TextInput
+      style={styles.followUpInput}
+      placeholder="e.g. Should I clear my loan first?"
+      placeholderTextColor={Colors.textMuted}
+      value={followUpInput}
+      onChangeText={setFollowUpInput}
+      multiline
+      editable={!followUpLoading}
+    />
+  </View>
+
+  <Pressable
+    disabled={!followUpInput.trim() || followUpLoading}
+    onPress={() => {
+      handleFollowUp().catch((e) => {
+        setFollowUpReply("Unable to load a reply right now. Please try again.");
+        console.error("[LifeEvents] Follow-up error:", e);
+      });
+    }}
+    style={[styles.followUpBtn, !followUpInput.trim() || followUpLoading ? styles.followUpBtnDisabled : null]}
+  >
+    <Text style={styles.followUpBtnText}>{followUpLoading ? "Thinking..." : "Ask FinMentor"}</Text>
+  </Pressable>
+
+  {followUpReply ? (
+    <Animatable.View animation="fadeIn" duration={400} style={styles.followUpReply}>
+      <Text style={styles.followUpReplyLabel}>FinMentor says</Text>
+      <Text style={styles.followUpReplyText}>{followUpReply}</Text>
+    </Animatable.View>
+  ) : null}
+</View>
          
       </View>
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>SIP streak</Text>
         <View style={styles.streakHero}>
-          <Text style={styles.streakFlame}>Flame {streak}</Text>
+          <View style={styles.streakFlameRow}>
+            <Text style={styles.streakEmoji}>🔥</Text>
+            <Text style={styles.streakFlameCount}>{streak}</Text>
+          </View>
           <Text style={styles.streakBody}>
             {currentMonthLogged
               ? "This month is already logged. Keep the streak alive next month too."
@@ -255,7 +458,11 @@ const [followUpLoading, setFollowUpLoading] = useState(false);
           <Button
             disabled={currentMonthLogged}
             label={currentMonthLogged ? "This Month Logged" : "Log This Month's SIP"}
-            onPress={() => void handleLogSip()}
+            onPress={() => {
+  handleLogSip().catch((e) => {
+    Alert.alert("Unable to log SIP", e instanceof Error ? e.message : "Please try again.");
+  });
+}}
           />
         </View>
 
@@ -265,7 +472,10 @@ const [followUpLoading, setFollowUpLoading] = useState(false);
 
             return (
               <View key={milestone} style={[styles.badge, reached ? styles.badgeActive : null]}>
-                <Text style={[styles.badgeLabel, reached ? styles.badgeLabelActive : null]}>{milestone} months</Text>
+                <Text style={[styles.badgeLabel, reached ? styles.badgeLabelActive : null]}>
+                  {reached ? "✓ " : ""}
+                  {milestone} months
+                </Text>
               </View>
             );
           })}
@@ -275,18 +485,12 @@ const [followUpLoading, setFollowUpLoading] = useState(false);
           <Text style={styles.calendarTitle}>Last 12 months</Text>
           <View style={styles.calendarGrid}>
             {calendar.map((month) => (
-              <View
+              <CalendarMonthChip
+                isCurrent={month.isCurrent}
                 key={month.key}
-                style={[
-                  styles.monthChip,
-                  month.logged ? styles.monthChipLogged : null,
-                  month.isCurrent ? styles.monthChipCurrent : null,
-                ]}
-              >
-                <Text style={[styles.monthChipLabel, month.logged ? styles.monthChipLabelLogged : null]}>
-                  {month.label}
-                </Text>
-              </View>
+                label={month.label}
+                logged={month.logged}
+              />
             ))}
           </View>
         </View>
@@ -299,7 +503,12 @@ const [followUpLoading, setFollowUpLoading] = useState(false);
               <Text style={styles.monthlyTitle}>Monthly money card</Text>
               <Text style={styles.monthlySubtitle}>{monthlyCard.monthLabel}</Text>
             </View>
-            <Button label="Share Story" loading={sharing} onPress={() => void handleShareMonthlyCard()} />
+            <Button
+              label="Share Story"
+              loading={sharing}
+              onPress={() => void handleShareMonthlyCard()}
+              style={styles.shareStoryBtn}
+            />
           </View>
 
           <Text style={styles.monthlyBody}>
@@ -384,15 +593,15 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   title: {
-    color: Colors.textPrimary,
-    fontFamily: Typography.fontFamily.display,
-    fontSize: Typography.size["2xl"],
+    color: "#FFFFFF",
+    fontFamily: Typography.fontFamily.displaySemiBold,
+    fontSize: 26,
   },
   subtitle: {
-    color: Colors.textSecondary,
+    color: "rgba(255,255,255,0.4)",
     fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.md,
-    lineHeight: 24,
+    fontSize: 14,
+    lineHeight: 20,
   },
   section: {
     gap: Spacing.md,
@@ -409,47 +618,75 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
   },
   eventCard: {
-    backgroundColor: Colors.card,
-    borderColor: Colors.border,
-    borderRadius: Radius.lg,
+    backgroundColor: "#1A1A1A",
+    borderColor: "#2A2A2A",
+    borderRadius: 16,
     borderWidth: 0.5,
     gap: Spacing.sm,
+    overflow: "hidden",
     padding: Spacing.lg,
     width: "48%",
   },
   eventCardActive: {
-    backgroundColor: "#EEF5FF",
-    borderColor: "#BFD1EC",
+    backgroundColor: "rgba(212,175,55,0.08)",
+    borderColor: "#D4AF37",
+    borderWidth: 1,
+  },
+  eventActiveAccent: {
+    backgroundColor: "#D4AF37",
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 3,
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 3,
+    bottom: 12,
+    left: 0,
+    position: "absolute",
+    top: 12,
+    width: 3,
   },
   eventLabel: {
-    color: Colors.textPrimary,
+    color: "rgba(255,255,255,0.7)",
     fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.md,
+    fontSize: 14,
   },
   eventLabelActive: {
-    color: Colors.navy,
+    color: "#FFFFFF",
   },
   eventHelper: {
-    color: Colors.textSecondary,
+    color: "rgba(255,255,255,0.3)",
     fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.sm,
-    lineHeight: 20,
+    fontSize: 12,
+    lineHeight: 18,
   },
   responseShell: {
-    backgroundColor: Colors.card,
-    borderColor: Colors.border,
-    borderRadius: Radius.lg,
+    backgroundColor: "#1A1A1A",
+    borderColor: "#2A2A2A",
+    borderRadius: 20,
     borderWidth: 0.5,
     gap: Spacing.md,
     padding: Spacing.xl,
   },
   responseTitle: {
-    color: Colors.textPrimary,
+    color: "#FFFFFF",
     fontFamily: Typography.fontFamily.displaySemiBold,
-    fontSize: Typography.size.lg,
+    fontSize: 18,
+  },
+  loadingRow: {
+    alignItems: "center",
+    flexDirection: "row",
+  },
+  loadingDotsRow: {
+    flexDirection: "row",
+    marginLeft: 4,
+  },
+  loadingDot: {
+    color: "#7F77DD",
+    fontFamily: Typography.fontFamily.displaySemiBold,
+    fontSize: 16,
+    marginRight: 1,
   },
   loadingText: {
-    color: Colors.purple,
+    color: "#7F77DD",
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.sm,
   },
@@ -459,77 +696,92 @@ const styles = StyleSheet.create({
     fontSize: Typography.size.sm,
   },
   adviceCard: {
-    backgroundColor: Colors.surface,
-    borderColor: Colors.border,
-    borderRadius: Radius.lg,
-    borderWidth: 0.5,
+    backgroundColor: "rgba(255,255,255,0.02)",
+    borderRadius: 12,
     gap: Spacing.sm,
-    padding: Spacing.lg,
+    padding: 12,
+  },
+  adviceRow: {
+    flexDirection: "row",
+    gap: Spacing.md,
   },
   adviceAccent: {
-    borderRadius: Radius.full,
-    height: 4,
-    width: 36,
+    borderRadius: 4,
+    height: 32,
+    marginTop: 2,
+    width: 4,
+  },
+  adviceCopyWrap: {
+    flex: 1,
   },
   adviceTitle: {
-    color: Colors.textPrimary,
+    color: "rgba(255,255,255,0.7)",
     fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.md,
+    fontSize: 13,
+    marginBottom: 6,
   },
   adviceBody: {
-    color: Colors.textSecondary,
+    color: "rgba(255,255,255,0.6)",
     fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.md,
+    fontSize: 14,
     lineHeight: 24,
   },
   streakHero: {
-    backgroundColor: Colors.navy,
-    borderColor: "rgba(12,35,64,0.12)",
-    borderRadius: Radius.lg,
+    backgroundColor: "#0D1B35",
+    borderRadius: 20,
     borderWidth: 0.5,
+    borderColor: "rgba(255,255,255,0.06)",
     gap: Spacing.md,
     padding: Spacing.xl,
   },
-  streakFlame: {
+  streakFlameRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: Spacing.sm,
+  },
+  streakEmoji: {
+    fontSize: 24,
+  },
+  streakFlameCount: {
     color: Colors.gold,
-    fontFamily: Typography.fontFamily.display,
-    fontSize: Typography.size["2xl"],
+    fontFamily: Typography.fontFamily.displaySemiBold,
+    fontSize: 32,
   },
   streakBody: {
-    color: "rgba(255,255,255,0.76)",
+    color: "rgba(255,255,255,0.6)",
     fontFamily: Typography.fontFamily.body,
     fontSize: Typography.size.sm,
-    lineHeight: 22,
+    lineHeight: 20,
   },
   badgeRow: {
     flexDirection: "row",
     gap: Spacing.md,
   },
   badge: {
-    backgroundColor: Colors.card,
-    borderColor: Colors.border,
+    backgroundColor: "transparent",
+    borderColor: "rgba(255,255,255,0.1)",
     borderRadius: Radius.full,
     borderWidth: 0.5,
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.sm,
   },
   badgeActive: {
-    backgroundColor: "#FFF4DB",
-    borderColor: "#F7D48A",
+    backgroundColor: "rgba(212,175,55,0.12)",
+    borderColor: "rgba(212,175,55,0.3)",
   },
   badgeLabel: {
-    color: Colors.textSecondary,
+    color: "rgba(255,255,255,0.3)",
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.sm,
   },
   badgeLabelActive: {
-    color: Colors.navy,
+    color: "#D4AF37",
   },
   calendarCard: {
-    backgroundColor: Colors.card,
-    borderColor: Colors.border,
-    borderRadius: Radius.lg,
+    backgroundColor: "#1A1A1A",
+    borderRadius: 20,
     borderWidth: 0.5,
+    borderColor: "#2A2A2A",
     gap: Spacing.md,
     padding: Spacing.xl,
   },
@@ -545,33 +797,34 @@ const styles = StyleSheet.create({
   },
   monthChip: {
     alignItems: "center",
-    backgroundColor: Colors.surface,
-    borderColor: Colors.border,
-    borderRadius: Radius.md,
+    backgroundColor: "rgba(255,255,255,0.03)",
+    borderColor: "rgba(255,255,255,0.06)",
+    borderRadius: 12,
     borderWidth: 0.5,
     justifyContent: "center",
-    minHeight: 48,
+    height: 52,
     width: "22%",
   },
   monthChipLogged: {
-    backgroundColor: "#EAF7F1",
-    borderColor: "#BFE3D4",
+    backgroundColor: "rgba(29,158,117,0.12)",
+    borderColor: "rgba(29,158,117,0.3)",
   },
   monthChipCurrent: {
     borderColor: Colors.gold,
+    borderWidth: 1,
   },
   monthChipLabel: {
-    color: Colors.textSecondary,
+    color: "rgba(255,255,255,0.25)",
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.sm,
   },
   monthChipLabelLogged: {
-    color: Colors.teal,
+    color: "#1D9E75",
   },
   monthlyCard: {
-    backgroundColor: "#EEF5FF",
-    borderColor: "#D8E4F5",
-    borderRadius: Radius.lg,
+    backgroundColor: "rgba(212,175,55,0.05)",
+    borderColor: "rgba(212,175,55,0.2)",
+    borderRadius: 20,
     borderWidth: 0.5,
     gap: Spacing.md,
     padding: Spacing.xl,
@@ -582,7 +835,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   monthlyTitle: {
-    color: Colors.navy,
+    color: "#FFFFFF",
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.lg,
   },
@@ -593,7 +846,7 @@ const styles = StyleSheet.create({
     marginTop: Spacing.xs,
   },
   monthlyBody: {
-    color: Colors.textSecondary,
+    color: "rgba(255,255,255,0.6)",
     fontFamily: Typography.fontFamily.body,
     fontSize: Typography.size.sm,
     lineHeight: 22,
@@ -604,19 +857,19 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   monthlyMetricLabel: {
-    color: Colors.textPrimary,
+    color: "#FFFFFF",
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.sm,
   },
   monthlyMetricValue: {
-    color: Colors.navy,
+    color: "#FFFFFF",
     fontFamily: Typography.fontFamily.displaySemiBold,
     fontSize: Typography.size.md,
   },
   monthlyTrack: {
-    backgroundColor: "#DCE6F5",
+    backgroundColor: "rgba(255,255,255,0.08)",
     borderRadius: Radius.full,
-    height: 10,
+    height: 8,
     overflow: "hidden",
   },
   monthlyFill: {
@@ -706,5 +959,79 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamily.body,
     fontSize: Typography.size.md,
     lineHeight: 24,
+  },
+  followUpShell: {
+    backgroundColor: "rgba(127,119,221,0.06)",
+    borderColor: "rgba(127,119,221,0.2)",
+    borderRadius: 20,
+    borderWidth: 0.5,
+    gap: Spacing.md,
+    padding: Spacing.xl,
+    marginTop: Spacing.md,
+  },
+  followUpTitle: {
+    color: "#FFFFFF",
+    fontFamily: Typography.fontFamily.bodyMedium,
+    fontSize: 16,
+  },
+  followUpSubtitle: {
+    color: "rgba(255,255,255,0.4)",
+    fontFamily: Typography.fontFamily.body,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  followUpInputRow: {
+    borderWidth: 0.5,
+    borderColor: "#2A2A2A",
+    borderRadius: 14,
+    backgroundColor: "#0D0D0D",
+  },
+  followUpInput: {
+    color: "#FFFFFF",
+    fontFamily: Typography.fontFamily.body,
+    fontSize: Typography.size.md,
+    minHeight: 80,
+    padding: Spacing.lg,
+    textAlignVertical: "top",
+  },
+  followUpBtn: {
+    alignItems: "center",
+    backgroundColor: "#7F77DD",
+    borderRadius: Radius.full,
+    justifyContent: "center",
+    minHeight: 48,
+    paddingHorizontal: Spacing.lg,
+  },
+  followUpBtnDisabled: {
+    opacity: 0.5,
+  },
+  followUpBtnText: {
+    color: "#FFFFFF",
+    fontFamily: Typography.fontFamily.bodyMedium,
+    fontSize: Typography.size.md,
+  },
+  followUpReply: {
+    backgroundColor: "rgba(127,119,221,0.08)",
+    borderRadius: 14,
+    borderWidth: 0.5,
+    borderColor: "rgba(127,119,221,0.25)",
+    padding: Spacing.lg,
+    gap: Spacing.sm,
+  },
+  followUpReplyLabel: {
+    color: "#7F77DD",
+    fontFamily: Typography.fontFamily.bodyMedium,
+    fontSize: Typography.size.xs,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+  },
+  followUpReplyText: {
+    color: "rgba(255,255,255,0.85)",
+    fontFamily: Typography.fontFamily.body,
+    fontSize: Typography.size.md,
+    lineHeight: 22,
+  },
+  shareStoryBtn: {
+    borderRadius: 99,
   },
 });

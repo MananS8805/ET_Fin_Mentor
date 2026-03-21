@@ -1,6 +1,7 @@
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import React, { useState } from "react";
 import {
+  Alert,
   ScrollView,
   StyleSheet,
   Text,
@@ -100,7 +101,7 @@ export default function PartnerInputForm({ onSave, onCancel, initialName }: Part
 
   const handleSave = () => {
     if (!partner.name) {
-      alert("Please enter partner's name.");
+      Alert.alert("Missing Information", "Please enter partner's name to continue.");
       return;
     }
     onSave({ partner, homeLoan, portfolio });

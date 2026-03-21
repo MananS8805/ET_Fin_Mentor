@@ -1,9 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, StyleSheet, Text, View } from "react-native";
+import { Alert, Pressable, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { router } from "expo-router";
 import * as Animatable from "react-native-animatable";
 import * as Sharing from "expo-sharing";
 import ViewShot from "react-native-view-shot";
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withRepeat,
+  withSequence,
+  withSpring,
+  withTiming,
+} from "react-native-reanimated";
 
 import { AnimatedScoreRing } from "../../src/components/AnimatedScoreRing";
 import { Button } from "../../src/components/Button";
@@ -19,23 +29,23 @@ import {
 } from "../../src/core/models/UserProfile";
 import { GeminiService } from "../../src/core/services/GeminiService";
 import { HealthScoreService, HealthScoreSnapshot } from "../../src/core/services/HealthScoreService";
-import { VictoryLine, VictoryChart, VictoryAxis, VictoryTheme } from "victory-native";
-import { useWindowDimensions } from "react-native";
+import { VictoryChart, VictoryScatter, VictoryTheme } from "victory-native";
+import { VictoryLineWrapper, VictoryAxisWrapper } from "../../src/components/VictoryWrappers";
 import { useAppStore } from "../../src/core/services/store";
 import { Colors, Radius, Spacing, Typography } from "../../src/core/theme";
 
 type ScoreBarProps = {
-  item: HealthDimensionDetail;
+  item: HealthDimensionDetail & { index: number };
   color: string;
   helper: string;
 };
 
 const DIMENSION_COLORS: Record<HealthDimensionDetail["key"], string> = {
-  emergency: Colors.teal,
-  insurance: Colors.gold,
-  investment: Colors.purple,
-  debt: Colors.red,
-  tax: Colors.navy,
+  emergency: "#1D9E75",
+  insurance: "#D4AF37",
+  investment: "#7F77DD",
+  debt: "#E24B4A",
+  tax: "#378ADD",
   retirement: "#2E5B9A",
 };
 
@@ -50,24 +60,44 @@ const DIMENSION_HELPERS: Record<HealthDimensionDetail["key"], string> = {
 
 const CATEGORY_META = {
   Critical: {
-    color: Colors.red,
+    color: "#E24B4A",
     description: "Your plan needs immediate attention in a few core areas.",
   },
   "Needs Work": {
-    color: Colors.gold,
+    color: "#D4AF37",
     description: "A few smart adjustments can lift your score quickly.",
   },
   Good: {
-    color: Colors.teal,
+    color: "#1D9E75",
     description: "You have a solid base and can now optimize systematically.",
   },
   Excellent: {
-    color: Colors.purple,
+    color: "#7F77DD",
     description: "You are operating from a strong financial position.",
   },
 } as const;
 
+function colorWithOpacity(hex: string, opacity: number) {
+  const clean = hex.replace("#", "");
+  const r = parseInt(clean.slice(0, 2), 16);
+  const g = parseInt(clean.slice(2, 4), 16);
+  const b = parseInt(clean.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${opacity})`;
+}
+
 function ScoreBar({ item, color, helper }: ScoreBarProps) {
+  const progress = useSharedValue(0);
+  const targetWidth = Math.max(4, item.score);
+
+  useEffect(() => {
+    progress.value = 0;
+    progress.value = withDelay(item.index * 60, withTiming(targetWidth, { duration: 700, easing: Easing.out(Easing.cubic) }));
+  }, [progress, targetWidth, item.index]);
+
+  const fillAnimatedStyle = useAnimatedStyle(() => ({
+    width: `${progress.value}%`,
+  }));
+
   return (
     <View style={styles.dimensionCard}>
       <View style={styles.dimensionRow}>
@@ -75,9 +105,41 @@ function ScoreBar({ item, color, helper }: ScoreBarProps) {
         <Text style={styles.dimensionValue}>{item.score.toFixed(0)}/100</Text>
       </View>
       <View style={styles.barTrack}>
-        <View style={[styles.barFill, { width: `${Math.max(4, item.score)}%`, backgroundColor: color }]} />
+        <Animated.View style={[styles.barFill, fillAnimatedStyle, { backgroundColor: color }]} />
       </View>
       <Text style={styles.dimensionHelper}>{helper}</Text>
+    </View>
+  );
+}
+
+function TipSkeleton() {
+  const shimmer = useSharedValue(-120);
+
+  useEffect(() => {
+    shimmer.value = withRepeat(
+      withSequence(
+        withTiming(260, { duration: 1100, easing: Easing.inOut(Easing.cubic) }),
+        withTiming(-120, { duration: 0 })
+      ),
+      -1,
+      false
+    );
+  }, [shimmer]);
+
+  const shimmerStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: shimmer.value }],
+  }));
+
+  return (
+    <View style={styles.tipCard}>
+      <View style={styles.skeletonWrap}>
+        <View style={styles.skeletonBar}>
+          <Animated.View style={[styles.skeletonShimmer, shimmerStyle]} />
+        </View>
+        <View style={styles.skeletonBarSmall}>
+          <Animated.View style={[styles.skeletonShimmer, shimmerStyle]} />
+        </View>
+      </View>
     </View>
   );
 }
@@ -86,7 +148,6 @@ function EmptyState() {
   return (
     <Screen scroll>
       <View style={styles.hero}>
-        {/* Removed Day 3 */}
         <Text style={styles.title}>Money Health Score</Text>
         <Text style={styles.subtitle}>
           Finish onboarding first so the app has enough financial context to calculate your 6-dimension score.
@@ -114,17 +175,29 @@ export default function HealthScoreScreen() {
   const [tipsError, setTipsError] = useState("");
   const [sharing, setSharing] = useState(false);
   const [scoreHistory, setScoreHistory] = useState<HealthScoreSnapshot[]>([]);
-const { width } = useWindowDimensions();
-const chartWidth = Math.max(300, width - Spacing["3xl"] * 2);
+  const { width } = useWindowDimensions();
+  const chartWidth = Math.max(300, width - Spacing["3xl"] * 2);
+  const ringCardScale = useSharedValue(0.85);
+  const ringCardOpacity = useSharedValue(0);
 
-// Save this month's score and load history on mount
-useEffect(() => {
-  if (!profile) return;
-  void (async () => {
-    const history = await HealthScoreService.saveScore(profile);
-    setScoreHistory(history);
-  })();
-}, [profile]);
+  // Save this month's score and load history on mount
+  useEffect(() => {
+    if (!profile) return;
+    void (async () => {
+      const history = await HealthScoreService.saveScore(profile);
+      setScoreHistory(history);
+    })();
+  }, [profile]);
+
+  useEffect(() => {
+    ringCardScale.value = withSpring(1, { damping: 12, stiffness: 130 });
+    ringCardOpacity.value = withSpring(1, { damping: 14, stiffness: 120 });
+  }, [ringCardOpacity, ringCardScale]);
+
+  const ringCardAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: ringCardOpacity.value,
+    transform: [{ scale: ringCardScale.value }],
+  }));
 
   const score = profile ? getOverallHealthScore(profile) : 0;
   const category = getHealthScoreCategory(score);
@@ -132,6 +205,11 @@ useEffect(() => {
   const dimensions = useMemo(() => (profile ? getHealthDimensionDetails(profile) : []), [profile]);
   const shareInsights = useMemo(() => (profile ? getHealthShareInsights(profile) : []), [profile]);
   const fallbackTips = useMemo(() => (profile ? getHealthImprovementFallback(profile) : []), [profile]);
+  const scoreHistoryData = useMemo(
+    () => scoreHistory.map((s) => ({ x: s.monthKey, y: s.score })),
+    [scoreHistory]
+  );
+  const lastHistoryPoint = scoreHistoryData.length ? scoreHistoryData[scoreHistoryData.length - 1] : null;
 
   useEffect(() => {
     if (!profile) {
@@ -215,7 +293,6 @@ useEffect(() => {
   return (
     <Screen scroll>
       <Animatable.View animation="fadeInUp" duration={500} style={styles.hero}>
-        {/* Removed Day 3 */}
         <Text style={styles.title}>Money Health Score</Text>
         <Text style={styles.subtitle}>
           Your overall score blends emergency readiness, protection, investing, debt, tax efficiency, and retirement
@@ -223,68 +300,93 @@ useEffect(() => {
         </Text>
       </Animatable.View>
 
-      <Animatable.View animation="fadeInUp" delay={100} duration={500} style={styles.ringCard}>
-        <AnimatedScoreRing color={categoryMeta.color} score={score}>
+      <Animated.View style={[styles.ringCard, ringCardAnimatedStyle]}>
+        <AnimatedScoreRing color={categoryMeta.color} score={score} trackColor="rgba(255,255,255,0.08)">
           <Text style={styles.ringValue}>{score.toFixed(0)}</Text>
-          <Text style={[styles.categoryChip, { backgroundColor: categoryMeta.color }]}>{category}</Text>
+          <Text
+            style={[
+              styles.categoryChip,
+              {
+                backgroundColor: colorWithOpacity(categoryMeta.color, 0.15),
+                borderColor: colorWithOpacity(categoryMeta.color, 0.4),
+                color: categoryMeta.color,
+              },
+            ]}
+          >
+            {category}
+          </Text>
           <Text style={styles.ringLabel}>Overall health</Text>
         </AnimatedScoreRing>
 
         <Text style={styles.categoryDescription}>{categoryMeta.description}</Text>
-      </Animatable.View>
+      </Animated.View>
       {scoreHistory.length >= 2 ? (
-  <Animatable.View animation="fadeInUp" delay={140} duration={500} style={styles.section}>
-    <Text style={styles.sectionTitle}>Score history</Text>
-    <View style={styles.chartCard}>
-      <VictoryChart
-        height={120}
-        padding={{ top: 16, bottom: 32, left: 48, right: 16 }}
-        theme={VictoryTheme.material}
-        width={chartWidth}
-      >
-        <VictoryAxis
-          style={{
-            axis: { stroke: Colors.border },
-            grid: { stroke: "transparent" },
-            tickLabels: {
-              fill: Colors.textSecondary,
-              fontFamily: Typography.fontFamily.body,
-              fontSize: 10,
-            },
-          }}
-          tickFormat={(t: string) => t.slice(5)} // "MM" only
-        />
-        <VictoryAxis
-          dependentAxis
-          domain={[0, 100]}
-          style={{
-            axis: { stroke: "transparent" },
-            grid: { stroke: "#E8EDF4" },
-            tickLabels: {
-              fill: Colors.textSecondary,
-              fontFamily: Typography.fontFamily.body,
-              fontSize: 10,
-            },
-          }}
-        />
-        <VictoryLine
-          data={scoreHistory.map((s) => ({ x: s.monthKey, y: s.score }))}
-          interpolation="monotoneX"
-          style={{ data: { stroke: Colors.gold, strokeWidth: 2.5 } }}
-        />
-      </VictoryChart>
-    </View>
-  </Animatable.View>
-) : null}
+        <Animatable.View animation="fadeInUp" delay={140} duration={500} style={styles.section}>
+          <Text style={styles.sectionTitle}>Score history</Text>
+          <View style={styles.chartCard}>
+            <VictoryChart
+              height={120}
+              padding={{ top: 16, bottom: 32, left: 48, right: 16 }}
+              theme={VictoryTheme.material}
+              width={chartWidth}
+            >
+              <VictoryAxisWrapper
+                style={{
+                  axis: { stroke: Colors.border },
+                  grid: { stroke: "rgba(255,255,255,0.04)" },
+                  tickLabels: {
+                    fill: "rgba(255,255,255,0.3)",
+                    fontFamily: Typography.fontFamily.body,
+                    fontSize: 10,
+                  },
+                }}
+                tickFormat={(t: string) => t.slice(5)} // "MM" only
+              />
+              <VictoryAxisWrapper
+                dependentAxis
+                domain={[0, 100]}
+                style={{
+                  axis: { stroke: "transparent" },
+                  grid: { stroke: "rgba(255,255,255,0.04)" },
+                  tickLabels: {
+                    fill: "rgba(255,255,255,0.3)",
+                    fontFamily: Typography.fontFamily.body,
+                    fontSize: 10,
+                  },
+                }}
+              />
+              <VictoryLineWrapper
+                data={scoreHistoryData}
+                interpolation="monotoneX"
+                style={{ data: { stroke: "#D4AF37", strokeWidth: 2.5 } }}
+              />
+              {lastHistoryPoint ? (
+                <VictoryScatter
+                  data={[lastHistoryPoint]}
+                  size={7}
+                  style={{ data: { fill: "rgba(212,175,55,0.22)" } }}
+                />
+              ) : null}
+              {lastHistoryPoint ? (
+                <VictoryScatter
+                  data={[lastHistoryPoint]}
+                  size={3.5}
+                  style={{ data: { fill: "#D4AF37" } }}
+                />
+              ) : null}
+            </VictoryChart>
+          </View>
+        </Animatable.View>
+      ) : null}
       <Animatable.View animation="fadeInUp" delay={180} duration={500} style={styles.section}>
         <Text style={styles.sectionTitle}>6 score dimensions</Text>
         <View style={styles.dimensionsWrap}>
-          {dimensions.map((item) => (
+          {dimensions.map((item, index) => (
             <ScoreBar
               key={item.key}
               color={DIMENSION_COLORS[item.key]}
               helper={DIMENSION_HELPERS[item.key]}
-              item={item}
+              item={{ ...item, index }}
             />
           ))}
         </View>
@@ -293,23 +395,29 @@ useEffect(() => {
       <Animatable.View animation="fadeInUp" delay={240} duration={500} style={styles.section}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>AI improvement tips</Text>
-          <Button
-            label={tipsLoading ? "Refreshing..." : "Refresh"}
-            loading={tipsLoading}
-            onPress={() => void handleRefreshTips()}
-            variant="secondary"
-          />
+          <Pressable
+            onPress={() => {
+              handleRefreshTips().catch((e) => {
+                setTipsError(e instanceof Error ? e.message : "Unable to refresh tips.");
+              });
+            }}
+            style={styles.refreshGhostBtn}
+          >
+            <Text style={styles.refreshGhostText}>{tipsLoading ? "Refreshing..." : "Refresh"}</Text>
+          </Pressable>
         </View>
 
         {tipsError ? <Text style={styles.warningText}>{tipsError}</Text> : null}
 
         <View style={styles.tipsWrap}>
-          {(tips.length ? tips : fallbackTips).slice(0, 3).map((tip, index) => (
-            <View key={`${index}-${tip}`} style={styles.tipCard}>
-              <Text style={styles.tipIndex}>0{index + 1}</Text>
-              <Text style={styles.tipText}>{tip}</Text>
-            </View>
-          ))}
+          {tipsLoading
+            ? [0, 1, 2].map((idx) => <TipSkeleton key={`skeleton-${idx}`} />)
+            : (tips.length ? tips : fallbackTips).slice(0, 3).map((tip, index) => (
+                <View key={`${index}-${tip}`} style={styles.tipCard}>
+                  <Text style={styles.tipIndex}>0{index + 1}</Text>
+                  <Text style={styles.tipText}>{tip}</Text>
+                </View>
+              ))}
         </View>
       </Animatable.View>
 
@@ -317,7 +425,16 @@ useEffect(() => {
         <View style={styles.shareCard}>
           <View style={styles.sectionHeader}>
             <Text style={styles.shareTitle}>Share your score</Text>
-            <Button label="Share Card" loading={sharing} onPress={() => void handleShare()} />
+            <Button
+              label="Share Card"
+              loading={sharing}
+              onPress={() => {
+                handleShare().catch((e) => {
+                  Alert.alert("Unable to share score", e instanceof Error ? e.message : "Please try again.");
+                });
+              }}
+              style={styles.shareButton}
+            />
           </View>
           <Text style={styles.shareBody}>
             The shared card includes your score, category, and 3 non-currency insights only. No rupee amounts are
@@ -325,9 +442,10 @@ useEffect(() => {
           </Text>
           <View style={styles.shareInsightList}>
             {shareInsights.map((insight) => (
-              <Text key={insight} style={styles.shareInsightText}>
-                {insight}
-              </Text>
+              <View key={insight} style={styles.shareInsightRow}>
+                <View style={styles.checkDot} />
+                <Text style={styles.shareInsightText}>{insight}</Text>
+              </View>
             ))}
           </View>
         </View>
@@ -377,17 +495,17 @@ const styles = StyleSheet.create({
   },
   ringCard: {
     alignItems: "center",
-    backgroundColor: Colors.card,
-    borderColor: Colors.border,
-    borderRadius: Radius.lg,
+    backgroundColor: "#1A1A1A",
+    borderColor: "#2A2A2A",
+    borderRadius: 24,
     borderWidth: 0.5,
     gap: Spacing.lg,
     marginBottom: Spacing.xl,
     padding: Spacing.xl,
   },
   ringValue: {
-    color: Colors.textPrimary,
-    fontFamily: Typography.fontFamily.display,
+    color: "#FFFFFF",
+    fontFamily: Typography.fontFamily.displaySemiBold,
     fontSize: 56,
   },
   ringLabel: {
@@ -396,8 +514,8 @@ const styles = StyleSheet.create({
     fontSize: Typography.size.sm,
   },
   categoryChip: {
+    borderWidth: 0.5,
     borderRadius: Radius.full,
-    color: Colors.white,
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.sm,
     overflow: "hidden",
@@ -405,10 +523,10 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.xs,
   },
   categoryDescription: {
-    color: Colors.textSecondary,
+    color: "rgba(255,255,255,0.55)",
     fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.md,
-    lineHeight: 24,
+    fontSize: 14,
+    lineHeight: 22,
     textAlign: "center",
   },
   section: {
@@ -429,10 +547,10 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
   },
   dimensionCard: {
-    backgroundColor: Colors.card,
-    borderRadius: Radius.lg,
+    backgroundColor: "#1A1A1A",
+    borderRadius: 16,
     borderWidth: 0.5,
-    borderColor: Colors.border,
+    borderColor: "#2A2A2A",
     padding: Spacing.lg,
     gap: Spacing.sm,
   },
@@ -447,19 +565,19 @@ const styles = StyleSheet.create({
     fontSize: Typography.size.md,
   },
   dimensionValue: {
-    color: Colors.textSecondary,
+    color: "rgba(255,255,255,0.85)",
     fontFamily: Typography.fontFamily.displaySemiBold,
     fontSize: Typography.size.md,
   },
   dimensionHelper: {
-    color: Colors.textSecondary,
+    color: "rgba(255,255,255,0.35)",
     fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.sm,
+    fontSize: 12,
   },
   barTrack: {
-    backgroundColor: "#E8EDF4",
+    backgroundColor: "rgba(255,255,255,0.06)",
     borderRadius: Radius.full,
-    height: 10,
+    height: 8,
     overflow: "hidden",
   },
   barFill: {
@@ -470,41 +588,78 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
   },
   tipCard: {
-    backgroundColor: Colors.card,
-    borderRadius: Radius.lg,
+    backgroundColor: "#1A1A1A",
+    borderRadius: 16,
     borderWidth: 0.5,
-    borderColor: Colors.border,
+    borderColor: "#2A2A2A",
     flexDirection: "row",
     gap: Spacing.md,
     padding: Spacing.lg,
   },
   tipIndex: {
-    color: Colors.gold,
-    fontFamily: Typography.fontFamily.display,
-    fontSize: Typography.size.lg,
+    color: "#D4AF37",
+    fontFamily: Typography.fontFamily.displaySemiBold,
+    fontSize: 20,
   },
   tipText: {
-    color: Colors.textPrimary,
+    color: "rgba(255,255,255,0.8)",
     flex: 1,
     fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.md,
-    lineHeight: 24,
+    fontSize: 14,
+    lineHeight: 22,
+  },
+  skeletonWrap: {
+    flex: 1,
+    gap: Spacing.sm,
+  },
+  skeletonBar: {
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderRadius: Radius.full,
+    height: 14,
+    overflow: "hidden",
+    width: "92%",
+  },
+  skeletonBarSmall: {
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderRadius: Radius.full,
+    height: 12,
+    overflow: "hidden",
+    width: "76%",
+  },
+  skeletonShimmer: {
+    backgroundColor: "rgba(255,255,255,0.22)",
+    height: "100%",
+    width: 120,
+  },
+  refreshGhostBtn: {
+    alignItems: "center",
+    borderColor: "rgba(212,175,55,0.25)",
+    borderRadius: Radius.full,
+    borderWidth: 0.5,
+    justifyContent: "center",
+    minHeight: 32,
+    paddingHorizontal: Spacing.md,
+  },
+  refreshGhostText: {
+    color: "#D4AF37",
+    fontFamily: Typography.fontFamily.bodyMedium,
+    fontSize: 12,
   },
   warningText: {
-    color: Colors.red,
+    color: "rgba(226,75,74,0.8)",
     fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.sm,
+    fontSize: 12,
   },
   shareCard: {
-    backgroundColor: Colors.navy,
-    borderRadius: Radius.lg,
+    backgroundColor: "#0D1B35",
+    borderRadius: 20,
     borderWidth: 0.5,
-    borderColor: "rgba(12,35,64,0.15)",
+    borderColor: "rgba(255,255,255,0.06)",
     gap: Spacing.md,
     padding: Spacing.xl,
   },
   shareBody: {
-    color: "rgba(255,255,255,0.78)",
+    color: "rgba(255,255,255,0.85)",
     fontFamily: Typography.fontFamily.body,
     fontSize: Typography.size.sm,
     lineHeight: 22,
@@ -513,14 +668,30 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   shareTitle: {
-    color: Colors.white,
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.lg,
+    color: "#FFFFFF",
+    fontFamily: Typography.fontFamily.displaySemiBold,
+    fontSize: 16,
+  },
+  shareInsightRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: Spacing.sm,
+  },
+  checkDot: {
+    backgroundColor: "#1D9E75",
+    borderRadius: Radius.full,
+    height: 7,
+    marginTop: 1,
+    width: 7,
   },
   shareInsightText: {
-    color: Colors.white,
-    fontFamily: Typography.fontFamily.bodyMedium,
+    color: "#FFFFFF",
+    flex: 1,
+    fontFamily: Typography.fontFamily.body,
     fontSize: Typography.size.sm,
+  },
+  shareButton: {
+    borderRadius: 99,
   },
   captureContainer: {
     left: -9999,
@@ -583,11 +754,11 @@ const styles = StyleSheet.create({
     lineHeight: 24,
   },
   chartCard: {
-  backgroundColor: Colors.card,
-  borderRadius: Radius.lg,
-  borderWidth: 0.5,
-  borderColor: Colors.border,
-  overflow: "hidden",
-  paddingVertical: Spacing.sm,
-},
+    backgroundColor: "#1A1A1A",
+    borderRadius: 20,
+    borderWidth: 0.5,
+    borderColor: "#2A2A2A",
+    overflow: "hidden",
+    paddingVertical: Spacing.sm,
+  },
 });

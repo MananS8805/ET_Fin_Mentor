@@ -16,8 +16,7 @@ import {
 } from "./GeminiService";
 
 export const TemplateService = {
-  getFutureYouNarrative(profile: UserProfileData, input: FutureYouNarrativeInput): string {
-    const scenarioSip = profile.monthlySIP * input.sipMultiplier;
+  getFutureYouNarrative(_profile: UserProfileData, input: FutureYouNarrativeInput): string {
     const passiveIncome = getMonthlyPassiveIncome(input.projectedCorpus);
     const gap = input.fireTarget - input.projectedCorpus;
     
@@ -31,7 +30,7 @@ export const TemplateService = {
     return `At age ${input.targetAge}, your projected corpus of ${formatINR(input.projectedCorpus)} will generate ${formatINR(passiveIncome)}/month in passive income using the 4% rule. ${gapText}`;
   },
 
-  getTaxBattleNarrative(profile: UserProfileData, input: TaxBattleNarrativeInput): string {
+  getTaxBattleNarrative(_profile: UserProfileData, input: TaxBattleNarrativeInput): string {
     if (input.taxSaving > 0) {
        return `The ${input.betterRegime} tax regime is mathematically better for you, offering ${formatINR(input.taxSaving)} more in your pocket this year. At your current salary of ${formatINR(input.annualIncome)}, switching your regime is the optimal move.`;
     }
@@ -99,7 +98,7 @@ export const TemplateService = {
     return lines.slice(0, 3).join("\n");
   },
 
-  getLifeEventAdvice(profile: UserProfileData, event: LifeEventKey): LifeEventAdvice {
+  getLifeEventAdvice(_profile: UserProfileData, event: LifeEventKey): LifeEventAdvice {
     const templates: Record<LifeEventKey, LifeEventAdvice> = {
       "bonus": {
         immediate: ["Park the entire amount in a liquid fund temporarily.", "Do not inflate your lifestyle or buy liabilities."],
@@ -136,7 +135,7 @@ export const TemplateService = {
     return templates[event] || templates["bonus"];
   },
 
-  getJointOptimizationAdvice(data: JointProfileData, result: JointOptimizationResult): string {
+  getJointOptimizationAdvice(_data: JointProfileData, result: JointOptimizationResult): string {
     const lines: string[] = [];
     
     // HRA

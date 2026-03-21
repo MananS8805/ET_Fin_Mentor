@@ -8,7 +8,7 @@ import {
   getDemoProfile,
 } from "../models/UserProfile";
 import { ChatMessage, GeminiService } from "./GeminiService";
-
+import * as SecureStore from "expo-secure-store";
 type AuthStatus = "idle" | "loading" | "authenticated" | "unauthenticated";
 
 interface AppState {
@@ -96,7 +96,21 @@ export const useAppStore = create<AppState>((set) => ({
 
   setPortfolioXRay: (portfolioXRay) => set({ portfolioXRay }),
 
-  setJointProfile: (jointProfile) => set({ jointProfile }),
+  setJointProfile: (jointProfile) => {
+  if (jointProfile) {
+    void SecureStore.setItemAsync(
+      "et_finmentor_joint_profile",
+      JSON.stringify(jointProfile),
+      { keychainService: "et-finmentor" }
+    ).catch((e) => console.warn("[Store] Failed to persist joint profile:", e));
+  } else {
+    void SecureStore.deleteItemAsync(
+      "et_finmentor_joint_profile",
+      { keychainService: "et-finmentor" }
+    ).catch(() => undefined);
+  }
+  set({ jointProfile });
+},
 
   reset: () => {
     GeminiService.clearHistory();

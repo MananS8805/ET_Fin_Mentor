@@ -1,16 +1,34 @@
 import { useEffect, useMemo, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
+import * as Animatable from "react-native-animatable";
+import { LinearGradient } from "expo-linear-gradient";
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withSpring,
+  withTiming,
+} from "react-native-reanimated";
 
-import { Button } from "../../src/components/Button";
 import { OtpInput } from "../../src/components/OtpInput";
-import { ProgressSegments } from "../../src/components/ProgressSegments";
-import { Screen } from "../../src/components/Screen";
 import { TextField } from "../../src/components/TextField";
 import { AppConfig } from "../../src/core/config";
 import { AuthLockoutError, AuthService } from "../../src/core/services/AuthService";
 import { useAppStore } from "../../src/core/services/store";
-import { Colors, Radius, Spacing, Typography } from "../../src/core/theme";
+import { Colors, Spacing, Typography } from "../../src/core/theme";
 
 type Step = 1 | 2 | 3 | 4 | 5;
 
@@ -37,6 +55,58 @@ const STEP_COPY: Record<Step, { title: string; subtitle: string }> = {
   },
 };
 
+type AuthActionButtonProps = {
+  label: string;
+  onPress: () => void;
+  loading?: boolean;
+  disabled?: boolean;
+  variant?: "primary" | "ghost" | "secondary";
+};
+
+function AuthActionButton({
+  label,
+  onPress,
+  loading = false,
+  disabled = false,
+  variant = "primary",
+}: AuthActionButtonProps) {
+  const scale = useSharedValue(1);
+
+  const buttonAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
+  const isPrimary = variant === "primary";
+  const isGhost = variant === "ghost";
+
+  return (
+    <Animated.View style={buttonAnimatedStyle}>
+      <Pressable
+        disabled={disabled || loading}
+        onPress={onPress}
+        onPressIn={() => {
+          scale.value = withSpring(0.97, { damping: 14, stiffness: 200 });
+        }}
+        onPressOut={() => {
+          scale.value = withSpring(1, { damping: 14, stiffness: 200 });
+        }}
+        style={[
+          styles.button,
+          isPrimary ? styles.primaryButton : styles.secondaryButton,
+          isGhost ? styles.ghostButton : null,
+          disabled || loading ? styles.buttonDisabled : null,
+        ]}
+      >
+        {loading ? (
+          <ActivityIndicator color={isPrimary ? "#0A0A0A" : Colors.white} />
+        ) : (
+          <Text style={[styles.buttonText, isPrimary ? styles.primaryButtonText : styles.secondaryButtonText]}>{label}</Text>
+        )}
+      </Pressable>
+    </Animated.View>
+  );
+}
+
 export default function AuthScreen() {
   const [step, setStep] = useState<Step>(1);
   const [phone, setPhone] = useState("");
@@ -48,10 +118,23 @@ export default function AuthScreen() {
     null
   );
   const [error, setError] = useState("");
+  const [progressTrackWidth, setProgressTrackWidth] = useState(0);
+
+  const logoScale = useSharedValue(0.6);
+  const progressWidth = useSharedValue(0);
+  const cardOpacity = useSharedValue(0);
+  const cardTranslateY = useSharedValue(40);
+  const errorTranslateY = useSharedValue(-10);
+  const errorOpacity = useSharedValue(0);
+  const biometricPulse = useSharedValue(1);
 
   const reset = useAppStore((state) => state.reset);
   const setSession = useAppStore((state) => state.setSession);
   const setCurrentProfile = useAppStore((state) => state.setCurrentProfile);
+
+  useEffect(() => {
+    logoScale.value = withSpring(1, { damping: 12, stiffness: 100 });
+  }, [logoScale]);
 
   useEffect(() => {
     if (countdown <= 0) {
@@ -62,6 +145,74 @@ export default function AuthScreen() {
     return () => clearTimeout(timer);
   }, [countdown]);
 
+  useEffect(() => {
+    if (!progressTrackWidth) {
+      return;
+    }
+
+    progressWidth.value = withTiming(progressTrackWidth * (step / 5), {
+      duration: 400,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, [progressTrackWidth, progressWidth, step]);
+
+  useEffect(() => {
+    cardOpacity.value = 0;
+    cardTranslateY.value = 40;
+
+    cardOpacity.value = withTiming(1, { duration: 350 });
+    cardTranslateY.value = withTiming(0, { duration: 350, easing: Easing.out(Easing.cubic) });
+  }, [cardOpacity, cardTranslateY, step]);
+
+  useEffect(() => {
+    if (error) {
+      errorOpacity.value = withTiming(1, { duration: 180 });
+      errorTranslateY.value = withSpring(0, { damping: 14, stiffness: 160 });
+      return;
+    }
+
+    errorOpacity.value = withTiming(0, { duration: 140 });
+    errorTranslateY.value = -10;
+  }, [error, errorOpacity, errorTranslateY]);
+
+  useEffect(() => {
+    if (step !== 5) {
+      biometricPulse.value = 1;
+      return;
+    }
+
+    biometricPulse.value = withRepeat(
+      withSequence(
+        withTiming(1.05, { duration: 1000, easing: Easing.inOut(Easing.cubic) }),
+        withTiming(1, { duration: 1000, easing: Easing.inOut(Easing.cubic) })
+      ),
+      -1,
+      false
+    );
+  }, [biometricPulse, step]);
+
+  const logoAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: logoScale.value }],
+  }));
+
+  const progressFillAnimatedStyle = useAnimatedStyle(() => ({
+    width: progressWidth.value,
+  }));
+
+  const stepCardAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: cardOpacity.value,
+    transform: [{ translateY: cardTranslateY.value }],
+  }));
+
+  const errorAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: errorOpacity.value,
+    transform: [{ translateY: errorTranslateY.value }],
+  }));
+
+  const biometricPulseStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: biometricPulse.value }],
+  }));
+
   const currentStep = STEP_COPY[step];
   const isConfigured = AppConfig.isSupabaseConfigured();
 
@@ -69,57 +220,78 @@ export default function AuthScreen() {
     switch (step) {
       case 1:
         return (
-          <Button
+          <AuthActionButton
             label={isConfigured ? "Send OTP" : "Add Supabase Keys First"}
             loading={busy === "phone-send"}
-            onPress={() => void handlePhoneSubmit()}
+            onPress={() => {
+              handlePhoneSubmit().catch((e) => presentError(e));
+            }}
             disabled={!isConfigured || phone.length !== 10}
           />
         );
       case 2:
         return (
-          <Button
+          <AuthActionButton
             label="Verify SMS OTP"
             loading={busy === "phone-verify"}
-            onPress={() => void handlePhoneVerification()}
+            onPress={() => {
+              handlePhoneVerification().catch((e) => presentError(e));
+            }}
             disabled={phoneOtp.length !== 6}
           />
         );
       case 3:
         return (
           <View style={styles.footerActions}>
-            <Button label="Skip For Now" variant="ghost" onPress={() => setStep(5)} />
-            <Button
-              label="Send Email OTP"
-              loading={busy === "email-send"}
-              onPress={() => void handleEmailSubmit()}
-              disabled={!isConfigured || !email.trim()}
-            />
+            <View style={styles.footerActionItem}>
+              <AuthActionButton label="Skip For Now" variant="ghost" onPress={() => setStep(5)} />
+            </View>
+            <View style={styles.footerActionItem}>
+              <AuthActionButton
+                label="Send Email OTP"
+                loading={busy === "email-send"}
+                onPress={() => {
+                  handleEmailSubmit().catch((e) => presentError(e));
+                }}
+                disabled={!isConfigured || !email.trim()}
+              />
+            </View>
           </View>
         );
       case 4:
         return (
-          <Button
+          <AuthActionButton
             label="Verify Email OTP"
             loading={busy === "email-verify"}
-            onPress={() => void handleEmailVerification()}
+            onPress={() => {
+              void handleEmailVerification();
+            }}
             disabled={emailOtp.length !== 6}
           />
         );
       case 5:
         return (
           <View style={styles.footerActions}>
-            <Button
-              label="Skip"
-              variant="secondary"
-              loading={busy === "finish"}
-              onPress={() => void completeAuth(false)}
-            />
-            <Button
-              label="Enable Biometric"
-              loading={busy === "finish"}
-              onPress={() => void completeAuth(true)}
-            />
+            <View style={styles.footerActionItem}>
+              <AuthActionButton
+                label="Skip"
+                variant="secondary"
+                disabled={busy === "finish"}
+                onPress={() => {
+                  void completeAuth(false);
+                }}
+              />
+            </View>
+            <View style={styles.footerActionItem}>
+              <AuthActionButton
+                label={error ? "Try Again" : "Enable Biometric"}
+                loading={busy === "finish"}
+                disabled={busy === "finish"}
+                onPress={() => {
+                  void completeAuth(true);
+                }}
+              />
+            </View>
           </View>
         );
     }
@@ -221,13 +393,16 @@ export default function AuthScreen() {
         const canUseBiometric = await AuthService.canUseBiometric();
 
         if (!canUseBiometric) {
-          throw new Error("No biometrics are enrolled on this device yet.");
+          await AuthService.setBiometricEnabled(false);
+          router.replace("/dashboard");
+          return;
         }
 
         const authenticated = await AuthService.promptBiometric("Enable biometric unlock");
 
         if (!authenticated) {
-          throw new Error("Biometric setup was cancelled.");
+          setError("Biometric setup failed or was cancelled. You can try again or skip.");
+          return;
         }
       }
 
@@ -250,149 +425,280 @@ export default function AuthScreen() {
   }
 
   return (
-    <Screen dark scroll footer={footer} contentContainerStyle={styles.content}>
-      <ProgressSegments total={5} current={step} />
+    <SafeAreaView edges={["left", "right", "top", "bottom"]} style={styles.safeArea}>
+      <LinearGradient
+        colors={["#060610", "#0A0A1A", "#0D0D24"]}
+        end={{ x: 1, y: 1 }}
+        start={{ x: 0, y: 0 }}
+        style={StyleSheet.absoluteFillObject}
+      />
 
-      {step > 1 ? (
-        <View style={styles.backRow}>
-          <Button label="Back" variant="ghost" onPress={goBackStep} />
-        </View>
-      ) : null}
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.flex}>
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          <Animated.View style={[styles.brandBlock, logoAnimatedStyle]}>
+            <View style={styles.logoCircle}>
+              <Text style={styles.logoText}>FM</Text>
+            </View>
+            <Text style={styles.brandTitle}>ET FinMentor</Text>
+            <Text style={styles.brandSubtitle}>Your AI-powered CA in your pocket</Text>
+          </Animated.View>
 
-      <View style={styles.hero}>
-        <Text style={styles.stepLabel}>Step {step} of 5</Text>
-        <Text style={styles.title}>{currentStep.title}</Text>
-        <Text style={styles.subtitle}>{currentStep.subtitle}</Text>
-      </View>
-
-      {!isConfigured && step === 1 ? (
-        <View style={styles.warningCard}>
-          <Text style={styles.warningTitle}>Live auth needs Supabase keys</Text>
-          <Text style={styles.warningBody}>
-            Add `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY` in `.env`, then restart Expo.
-          </Text>
-        </View>
-      ) : null}
-
-      {error ? (
-        <View style={styles.errorCard}>
-          <Text style={styles.errorText}>{error}</Text>
-        </View>
-      ) : null}
-
-      {step === 1 ? (
-        <View style={styles.panel}>
-          <TextField
-            dark
-            keyboardType="phone-pad"
-            label="Mobile number"
-            maxLength={10}
-            onChangeText={(value) => setPhone(value.replace(/\D/g, "").slice(0, 10))}
-            placeholder="9876543210"
-            prefix="+91"
-            value={phone}
-          />
-        </View>
-      ) : null}
-
-      {step === 2 ? (
-        <View style={styles.panel}>
-          <OtpInput dark value={phoneOtp} onChange={setPhoneOtp} />
-          <View style={styles.inlineRow}>
-            <Text style={styles.inlineLabel}>
-              {countdown > 0 ? `Resend available in ${countdown}s` : "Didn't get the code?"}
-            </Text>
-            <Button
-              label="Resend"
-              onPress={() => void handlePhoneSubmit()}
-              variant="ghost"
-              disabled={countdown > 0}
-            />
+          <View style={styles.progressHeaderRow}>
+            <View style={styles.progressSpacer} />
+            <Text style={styles.progressStepLabel}>Step {step} of 5</Text>
           </View>
-        </View>
-      ) : null}
-
-      {step === 3 ? (
-        <View style={styles.panel}>
-          <TextField
-            dark
-            autoCapitalize="none"
-            keyboardType="email-address"
-            label="Email address"
-            onChangeText={setEmail}
-            placeholder="you@example.com"
-            value={email}
-          />
-        </View>
-      ) : null}
-
-      {step === 4 ? (
-        <View style={styles.panel}>
-          <OtpInput dark value={emailOtp} onChange={setEmailOtp} />
-          <View style={styles.inlineRow}>
-            <Text style={styles.inlineLabel}>
-              {countdown > 0 ? `Resend available in ${countdown}s` : "Didn't get the email?"}
-            </Text>
-            <Button
-              label="Resend"
-              onPress={() => void handleEmailSubmit()}
-              variant="ghost"
-              disabled={countdown > 0}
-            />
+          <View
+            onLayout={(event) => setProgressTrackWidth(event.nativeEvent.layout.width)}
+            style={styles.progressTrack}
+          >
+            <Animated.View style={[styles.progressFill, progressFillAnimatedStyle]} />
           </View>
-        </View>
-      ) : null}
 
-      {step === 5 ? (
-        <View style={styles.panel}>
-          <View style={styles.biometricCard}>
-            <Text style={styles.biometricTitle}>Secure every app reopen</Text>
-            <Text style={styles.biometricBody}>
-              If enabled, ET FinMentor will ask for device biometrics before opening a saved session.
-            </Text>
-          </View>
-        </View>
-      ) : null}
-    </Screen>
+          {step > 1 ? (
+            <View style={styles.backRow}>
+              <AuthActionButton label="Back" onPress={goBackStep} variant="ghost" />
+            </View>
+          ) : null}
+
+          <Animated.View style={[styles.stepCard, stepCardAnimatedStyle]}>
+            <Text style={styles.title}>{currentStep.title}</Text>
+            <Text style={styles.subtitle}>{currentStep.subtitle}</Text>
+
+            {!isConfigured && step === 1 ? (
+              <View style={styles.warningCard}>
+                <Text style={styles.warningTitle}>Live auth needs Supabase keys</Text>
+                <Text style={styles.warningBody}>
+                  Add `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_ANON_KEY` in `.env`, then restart Expo.
+                </Text>
+              </View>
+            ) : null}
+
+            {error ? (
+              <Animated.View style={[styles.errorCard, errorAnimatedStyle]}>
+                <Text style={styles.errorText}>{error}</Text>
+              </Animated.View>
+            ) : null}
+
+            {step === 1 ? (
+              <View style={styles.panelSection}>
+                <TextField
+                  dark
+                  keyboardType="phone-pad"
+                  label="Mobile number"
+                  maxLength={10}
+                  onChangeText={(value) => setPhone(value.replace(/\D/g, "").slice(0, 10))}
+                  placeholder="9876543210"
+                  prefix="+91"
+                  value={phone}
+                />
+              </View>
+            ) : null}
+
+            {step === 2 ? (
+              <View style={styles.panelSection}>
+                <OtpInput dark value={phoneOtp} onChange={setPhoneOtp} />
+                <View style={styles.inlineRow}>
+                  <Text style={styles.inlineLabel}>
+                    {countdown > 0 ? `Please wait ${countdown}s before resending` : "Didn't get the code?"}
+                  </Text>
+                  {countdown === 0 ? (
+                    <AuthActionButton
+                      label="Resend"
+                      onPress={() => {
+                        void handlePhoneSubmit();
+                      }}
+                      variant="ghost"
+                    />
+                  ) : null}
+                </View>
+              </View>
+            ) : null}
+
+            {step === 3 ? (
+              <View style={styles.panelSection}>
+                <TextField
+                  dark
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  label="Email address"
+                  onChangeText={setEmail}
+                  placeholder="you@example.com"
+                  value={email}
+                />
+              </View>
+            ) : null}
+
+            {step === 4 ? (
+              <View style={styles.panelSection}>
+                <OtpInput dark value={emailOtp} onChange={setEmailOtp} />
+                <View style={styles.inlineRow}>
+                  <Text style={styles.inlineLabel}>
+                    {countdown > 0 ? `Please wait ${countdown}s before resending` : "Didn't get the email?"}
+                  </Text>
+                  {countdown === 0 ? (
+                    <AuthActionButton
+                      label="Resend"
+                      onPress={() => {
+                        void handleEmailSubmit();
+                      }}
+                      variant="ghost"
+                    />
+                  ) : null}
+                </View>
+              </View>
+            ) : null}
+
+            {step === 5 ? (
+              <View style={styles.panelSection}>
+                <Animated.View style={[styles.biometricIconWrap, biometricPulseStyle]}>
+                  <Text style={styles.biometricIcon}>🔐</Text>
+                </Animated.View>
+                <Animatable.View animation="fadeIn" duration={420} style={styles.biometricCard}>
+                  <Text style={styles.biometricTitle}>Secure every app reopen</Text>
+                  <Text style={styles.biometricBody}>
+                    If enabled, ET FinMentor will ask for device biometrics before opening a saved session.
+                  </Text>
+                </Animatable.View>
+              </View>
+            ) : null}
+          </Animated.View>
+        </ScrollView>
+
+        <View style={styles.footer}>{footer}</View>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  content: {
-    gap: Spacing.xl,
-    paddingTop: Spacing.xl,
+  safeArea: {
+    backgroundColor: "#060610",
+    flex: 1,
   },
-  hero: {
-    gap: Spacing.md,
+  flex: {
+    flex: 1,
+  },
+  content: {
+    flexGrow: 1,
+    gap: Spacing.lg,
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing["2xl"],
+  },
+  brandBlock: {
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: Spacing.md,
+  },
+  logoCircle: {
+    alignItems: "center",
+    backgroundColor: Colors.gold,
+    borderRadius: 40,
+    height: 80,
+    justifyContent: "center",
+    marginBottom: Spacing.md,
+    width: 80,
+  },
+  logoText: {
+    color: Colors.navy,
+    fontFamily: Typography.fontFamily.display,
+    fontSize: 30,
+    fontWeight: "700",
+    letterSpacing: 0.8,
+  },
+  brandTitle: {
+    color: Colors.white,
+    fontFamily: Typography.fontFamily.display,
+    fontSize: 28,
+    fontWeight: "700",
+    marginBottom: 4,
+  },
+  brandSubtitle: {
+    color: "rgba(255,255,255,0.55)",
+    fontFamily: Typography.fontFamily.body,
+    fontSize: 13,
+  },
+  progressHeaderRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  progressSpacer: {
+    flex: 1,
+  },
+  progressStepLabel: {
+    color: Colors.gold,
+    fontFamily: Typography.fontFamily.bodyMedium,
+    fontSize: 12,
+  },
+  progressTrack: {
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderRadius: 99,
+    height: 3,
+    overflow: "hidden",
+    width: "100%",
+  },
+  progressFill: {
+    backgroundColor: Colors.gold,
+    borderRadius: 99,
+    height: 3,
   },
   backRow: {
     alignItems: "flex-start",
+    marginTop: Spacing.xs,
   },
-  stepLabel: {
-    color: Colors.gold,
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.sm,
-    letterSpacing: 0.8,
-    textTransform: "uppercase",
+  stepCard: {
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderColor: "rgba(255,255,255,0.08)",
+    borderRadius: 24,
+    borderWidth: 0.5,
+    gap: Spacing.lg,
+    padding: Spacing.xl,
   },
   title: {
     color: Colors.white,
     fontFamily: Typography.fontFamily.display,
-    fontSize: Typography.size["2xl"],
+    fontSize: 26,
+    fontWeight: "700",
   },
   subtitle: {
-    color: "rgba(255,255,255,0.72)",
+    color: "rgba(255,255,255,0.55)",
     fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.md,
-    lineHeight: 24,
+    fontSize: 14,
+    lineHeight: 22,
   },
-  panel: {
-    gap: Spacing.lg,
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderRadius: Radius.lg,
+  warningCard: {
+    backgroundColor: "rgba(245,166,35,0.14)",
+    borderColor: "rgba(245,166,35,0.28)",
+    borderRadius: 14,
     borderWidth: 0.5,
-    borderColor: "rgba(255,255,255,0.12)",
-    padding: Spacing.xl,
+    gap: Spacing.sm,
+    padding: Spacing.lg,
+  },
+  warningTitle: {
+    color: Colors.gold,
+    fontFamily: Typography.fontFamily.bodyMedium,
+    fontSize: Typography.size.md,
+  },
+  warningBody: {
+    color: Colors.white,
+    fontFamily: Typography.fontFamily.body,
+    fontSize: Typography.size.sm,
+    lineHeight: 22,
+  },
+  errorCard: {
+    backgroundColor: "rgba(226,75,74,0.12)",
+    borderColor: "rgba(226,75,74,0.3)",
+    borderRadius: 14,
+    borderWidth: 0.5,
+    padding: Spacing.lg,
+  },
+  errorText: {
+    color: "#FFD7D7",
+    fontFamily: Typography.fontFamily.bodyMedium,
+    fontSize: Typography.size.sm,
+  },
+  panelSection: {
+    gap: Spacing.lg,
   },
   inlineRow: {
     alignItems: "center",
@@ -401,39 +707,18 @@ const styles = StyleSheet.create({
   },
   inlineLabel: {
     color: "rgba(255,255,255,0.68)",
+    flex: 1,
     fontFamily: Typography.fontFamily.body,
     fontSize: Typography.size.sm,
+    paddingRight: Spacing.sm,
   },
-  warningCard: {
-    backgroundColor: "rgba(245,166,35,0.14)",
-    borderRadius: Radius.lg,
-    borderWidth: 0.5,
-    borderColor: "rgba(245,166,35,0.24)",
-    padding: Spacing.lg,
-    gap: Spacing.sm,
+  biometricIconWrap: {
+    alignItems: "center",
+    justifyContent: "center",
   },
-  warningTitle: {
-    color: Colors.gold,
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.md,
-  },
-  warningBody: {
-    color: "rgba(255,255,255,0.78)",
-    fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.sm,
-    lineHeight: 22,
-  },
-  errorCard: {
-    backgroundColor: "rgba(226,75,74,0.14)",
-    borderRadius: Radius.lg,
-    borderWidth: 0.5,
-    borderColor: "rgba(226,75,74,0.28)",
-    padding: Spacing.lg,
-  },
-  errorText: {
-    color: "#FFD7D7",
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.sm,
+  biometricIcon: {
+    fontSize: 64,
+    textAlign: "center",
   },
   biometricCard: {
     gap: Spacing.sm,
@@ -449,8 +734,50 @@ const styles = StyleSheet.create({
     fontSize: Typography.size.md,
     lineHeight: 24,
   },
+  footer: {
+    paddingHorizontal: Spacing.lg,
+    paddingBottom: Spacing.lg,
+    paddingTop: Spacing.md,
+  },
   footerActions: {
     flexDirection: "row",
     gap: Spacing.md,
+  },
+  footerActionItem: {
+    flex: 1,
+  },
+  button: {
+    alignItems: "center",
+    borderRadius: 99,
+    height: 56,
+    justifyContent: "center",
+    paddingHorizontal: Spacing.lg,
+  },
+  primaryButton: {
+    backgroundColor: Colors.gold,
+  },
+  secondaryButton: {
+    backgroundColor: "transparent",
+    borderColor: "rgba(255,255,255,0.2)",
+    borderWidth: 0.5,
+  },
+  ghostButton: {
+    backgroundColor: "transparent",
+    borderColor: "rgba(255,255,255,0.2)",
+    borderWidth: 0.5,
+  },
+  buttonDisabled: {
+    opacity: 0.4,
+  },
+  buttonText: {
+    fontFamily: Typography.fontFamily.bodyMedium,
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  primaryButtonText: {
+    color: "#0A0A0A",
+  },
+  secondaryButtonText: {
+    color: "rgba(255,255,255,0.7)",
   },
 });

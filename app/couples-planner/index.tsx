@@ -15,8 +15,9 @@ import {
   Modal,
 } from "react-native";
 import * as Animatable from "react-native-animatable";
+import Animated, { Easing, runOnJS, useAnimatedReaction, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 
-import { Colors, Typography } from "../../src/core/theme";
+import { Colors, Radius, Spacing, Typography } from "../../src/core/theme";
 import { useAppStore } from "../../src/core/services/store";
 import { 
   JointProfileData, 
@@ -29,14 +30,50 @@ import PartnerInputForm from "./components/PartnerInputForm";
 import JointHarvestingView from "./components/JointHarvestingView";
 import HomeLoanAdvisor from "./components/HomeLoanAdvisor";
 
+function AnimatedNetWorth({ value }: { value: number }) {
+  const progress = useSharedValue(0);
+  const [displayValue, setDisplayValue] = useState(0);
+
+  useEffect(() => {
+    progress.value = 0;
+    progress.value = withTiming(value, { duration: 900, easing: Easing.out(Easing.cubic) });
+  }, [progress, value]);
+
+  useAnimatedReaction(
+    () => Math.round(progress.value),
+    (next, prev) => {
+      if (next !== prev) {
+        runOnJS(setDisplayValue)(next);
+      }
+    },
+    [progress]
+  );
+
+  return <Text style={styles.scoreValue}>{formatINR(displayValue, true)}</Text>;
+}
+
 export default function CouplesPlannerScreen() {
   const router = useRouter();
-  const { currentProfile, jointProfile, setJointProfile } = useAppStore();
+  const currentProfile = useAppStore((state) => state.currentProfile);
+  const jointProfile = useAppStore((state) => state.jointProfile);
+  const setJointProfile = useAppStore((state) => state.setJointProfile);
   const [loading, setLoading] = useState(false);
   const [aiAdvice, setAiAdvice] = useState<string | null>(null);
   const [optimization, setOptimization] = useState<JointOptimizationResult | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [activeView, setActiveView] = useState<"harvesting" | "homeloan" | null>(null);
+  const emptyY = useSharedValue(30);
+  const emptyOpacity = useSharedValue(0);
+
+  useEffect(() => {
+    emptyY.value = withTiming(0, { duration: 500, easing: Easing.out(Easing.cubic) });
+    emptyOpacity.value = withTiming(1, { duration: 500, easing: Easing.out(Easing.cubic) });
+  }, [emptyOpacity, emptyY]);
+
+  const emptyAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: emptyOpacity.value,
+    transform: [{ translateY: emptyY.value }],
+  }));
 
   useEffect(() => {
     if (jointProfile) {
@@ -98,9 +135,9 @@ export default function CouplesPlannerScreen() {
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
         {!jointProfile ? (
-          <Animatable.View animation="fadeInUp" style={styles.emptyState}>
+          <Animated.View style={[styles.emptyState, emptyAnimatedStyle]}>
             <View style={styles.iconCircle}>
-              <MaterialCommunityIcons name="account-group" size={48} color={Colors.gold} />
+              <Text style={styles.iconEmoji}>👫</Text>
             </View>
             <Text style={styles.emptyTitle}>Better Together</Text>
             <Text style={styles.emptySubtitle}>
@@ -117,7 +154,9 @@ export default function CouplesPlannerScreen() {
                 "Home Loan co-borrower advisor"
               ].map((feature, i) => (
                 <View key={i} style={styles.featureItem}>
-                  <Ionicons name="checkmark-circle" size={20} color={Colors.teal} />
+                  <View style={styles.featureTickCircle}>
+                    <Text style={styles.featureTick}>✓</Text>
+                  </View>
                   <Text style={styles.featureText}>{feature}</Text>
                 </View>
               ))}
@@ -127,51 +166,135 @@ export default function CouplesPlannerScreen() {
               <Text style={styles.buttonText}>Add Partner Details</Text>
               <Ionicons name="arrow-forward" size={20} color={Colors.navy} />
             </TouchableOpacity>
-          </Animatable.View>
+          </Animated.View>
         ) : (
-          <View>
-            {/* Joint Dashboard will be implemented here */}
-            <Text style={styles.sectionTitle}>Joint Strategy</Text>
-            {loading ? (
-              <ActivityIndicator color={Colors.purple} style={{ marginVertical: 20 }} />
-            ) : aiAdvice ? (
-              <Animatable.View animation="fadeIn" style={styles.aiCard}>
-                <View style={styles.aiHeader}>
-                  <MaterialCommunityIcons name="robot" size={20} color={Colors.purple} />
-                  <Text style={styles.aiLabel}>AI INSIGHTS</Text>
-                </View>
-                <Text style={styles.aiText}>{aiAdvice}</Text>
-              </Animatable.View>
-            ) : null}
+  <View style={{ gap: Spacing.lg }}>
+    <Text style={styles.sectionTitle}>Joint Strategy</Text>
 
-            {optimization && (
-              <View style={styles.grid}>
-                <View style={styles.scoreCard}>
-                  <Text style={styles.scoreLabel}>Combined Net Worth</Text>
-                  <Text style={styles.scoreValue}>{formatINR(optimization.combinedNetWorth, true)}</Text>
-                </View>
-                
-                <TouchableOpacity style={styles.optCard}>
-                  <Text style={styles.optTitle}>HRA Optimization</Text>
-                  <Text style={styles.optHighlight}>{optimization.hraSuggestion.recommendedClaimer.toUpperCase()} claims</Text>
-                  <Text style={styles.optSub}>Save {formatINR(optimization.hraSuggestion.estimatedSaving)}</Text>
-                </TouchableOpacity>
+    {/* AI Insights */}
+    {loading ? (
+      <ActivityIndicator color={Colors.purple} style={{ marginVertical: 20 }} />
+    ) : aiAdvice ? (
+      <Animatable.View animation="fadeIn" style={styles.aiCard}>
+        <View style={styles.aiHeader}>
+          <MaterialCommunityIcons name="robot" size={20} color={Colors.purple} />
+          <Text style={styles.aiLabel}>AI INSIGHTS</Text>
+        </View>
+        <Text style={styles.aiText}>{aiAdvice}</Text>
+      </Animatable.View>
+    ) : null}
 
-                <TouchableOpacity style={styles.optCard} onPress={() => setActiveView("harvesting")}>
-                  <Text style={styles.optTitle}>Tax Harvesting</Text>
-                  <Text style={styles.optHighlight}>{formatINR(optimization.taxHarvesting.totalTaxFreeGain, true)}</Text>
-                  <Text style={styles.optSub}>Tax-free gains this year</Text>
-                </TouchableOpacity>
+    {optimization && (
+      <>
+        {/* Combined Net Worth */}
+        <View style={styles.scoreCard}>
+          <Text style={styles.scoreLabel}>Combined Net Worth</Text>
+          <AnimatedNetWorth value={optimization.combinedNetWorth} />
+        </View>
 
-                <TouchableOpacity style={styles.optCard} onPress={() => setActiveView("homeloan")}>
-                  <Text style={styles.optTitle}>Home Loan</Text>
-                  <Text style={styles.optHighlight}>Save {formatINR(optimization.homeLoanAdvice.estimatedTaxBenefit, true)}</Text>
-                  <Text style={styles.optSub}>via optimal co-borrowing</Text>
-                </TouchableOpacity>
-              </View>
+        {/* 2x2 Action Grid */}
+        <View style={styles.grid}>
+          {/* HRA — now has onPress */}
+          <TouchableOpacity
+            style={styles.optCard}
+            onPress={() => Alert.alert(
+              "HRA Optimization",
+              `${optimization.hraSuggestion.recommendedClaimer === "user"
+                ? currentProfile.name
+                : jointProfile?.partner?.name ?? "Partner"} should claim HRA to save ${formatINR(optimization.hraSuggestion.estimatedSaving)}.\n\n${optimization.hraSuggestion.reason}`
             )}
+          >
+            <Text style={styles.optTitle}>HRA Optimization</Text>
+            <Text style={styles.optHighlight}>
+              {optimization.hraSuggestion.recommendedClaimer === "none"
+                ? "No HRA data"
+                : `${optimization.hraSuggestion.recommendedClaimer.toUpperCase()} claims`}
+            </Text>
+            <Text style={styles.optSub}>
+              {optimization.hraSuggestion.estimatedSaving > 0
+                ? `Save ${formatINR(optimization.hraSuggestion.estimatedSaving)}`
+                : "Enter HRA data to optimize"}
+            </Text>
+          </TouchableOpacity>
+
+          {/* Tax Harvesting */}
+          <TouchableOpacity style={styles.optCard} onPress={() => setActiveView("harvesting")}>
+            <Text style={styles.optTitle}>Tax Harvesting</Text>
+            <Text style={styles.optHighlight}>{formatINR(optimization.taxHarvesting.totalTaxFreeGain, true)}</Text>
+            <Text style={styles.optSub}>Tax-free gains this year</Text>
+          </TouchableOpacity>
+
+          {/* Home Loan */}
+          <TouchableOpacity style={styles.optCard} onPress={() => setActiveView("homeloan")}>
+            <Text style={styles.optTitle}>Home Loan</Text>
+            <Text style={styles.optHighlight}>
+              {optimization.homeLoanAdvice.estimatedTaxBenefit > 0
+                ? `Save ${formatINR(optimization.homeLoanAdvice.estimatedTaxBenefit, true)}`
+                : "No joint loan"}
+            </Text>
+            <Text style={styles.optSub}>via optimal co-borrowing</Text>
+          </TouchableOpacity>
+
+          {/* NPS Strategy — was completely missing */}
+          <TouchableOpacity
+            style={styles.optCard}
+            onPress={() => Alert.alert(
+              "NPS Strategy",
+              optimization.npsStrategy.message
+            )}
+          >
+            <Text style={styles.optTitle}>NPS Strategy</Text>
+            <Text style={styles.optHighlight}>
+              {formatINR(
+                optimization.npsStrategy.userContribution +
+                optimization.npsStrategy.partnerContribution,
+                true
+              )}
+            </Text>
+            <Text style={styles.optSub}>combined NPS contribution</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* SIP Splits — was completely missing */}
+        <View style={styles.sipCard}>
+          <Text style={styles.sipTitle}>SIP Split Strategy</Text>
+          <Text style={styles.sipReason}>{optimization.sipSplits.reason}</Text>
+          <View style={styles.sipRow}>
+            <View style={styles.sipCol}>
+              <Text style={styles.sipName}>{currentProfile.name}</Text>
+              <Text style={styles.sipAmount}>{formatINR(optimization.sipSplits.userSIP)}/mo</Text>
+            </View>
+            <View style={styles.sipDivider} />
+            <View style={styles.sipCol}>
+              <Text style={styles.sipName}>{jointProfile?.partner?.name ?? "Partner"}</Text>
+              <Text style={styles.sipAmount}>{formatINR(optimization.sipSplits.partnerSIP)}/mo</Text>
+            </View>
           </View>
-        )}
+        </View>
+
+        {/* Insurance Advice — was completely missing */}
+        <View style={styles.insuranceCard}>
+          <Text style={styles.insuranceTitle}>Insurance Advice</Text>
+          <Text style={styles.insuranceType}>
+            Recommended: {optimization.insuranceAdvice.type === "joint-floater"
+              ? "Joint Family Floater"
+              : "Individual Plans"}
+          </Text>
+          <Text style={styles.insuranceReason}>{optimization.insuranceAdvice.reason}</Text>
+          <Text style={styles.insuranceAction}>{optimization.insuranceAdvice.action}</Text>
+        </View>
+
+        {/* Edit partner data */}
+        <TouchableOpacity
+          style={styles.editButton}
+          onPress={() => setShowForm(true)}
+        >
+          <Text style={styles.editButtonText}>Edit Partner Details</Text>
+        </TouchableOpacity>
+      </>
+    )}
+  </View>
+)}
       </ScrollView>
 
       <Modal visible={showForm} animationType="slide">
@@ -222,7 +345,7 @@ const styles = StyleSheet.create({
     maxHeight: "85%",
   },
   header: {
-    backgroundColor: Colors.navy,
+    backgroundColor: "#0D1B35",
     paddingTop: 60,
     paddingBottom: 20,
     paddingHorizontal: 20,
@@ -242,7 +365,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.gold,
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 4,
+    borderRadius: Radius.full,
   },
   badgeText: {
     fontSize: 10,
@@ -257,31 +380,36 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     marginTop: 40,
-    backgroundColor: Colors.card,
+    backgroundColor: "transparent",
     borderRadius: 16,
     padding: 24,
     borderWidth: 0.5,
-    borderColor: Colors.border,
+    borderColor: "transparent",
   },
   iconCircle: {
     width: 100,
     height: 100,
     borderRadius: 50,
-    backgroundColor: Colors.surface,
+    backgroundColor: "rgba(212,175,55,0.08)",
+    borderWidth: 0.5,
+    borderColor: "rgba(212,175,55,0.15)",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 20,
   },
+  iconEmoji: {
+    fontSize: 44,
+  },
   emptyTitle: {
-    fontSize: 24,
-    fontFamily: Typography.fontFamily.display,
-    color: Colors.navy,
+    fontSize: 26,
+    fontFamily: Typography.fontFamily.displaySemiBold,
+    color: "#FFFFFF",
     marginBottom: 10,
   },
   emptySubtitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontFamily: Typography.fontFamily.body,
-    color: Colors.textSecondary,
+    color: "rgba(255,255,255,0.5)",
     textAlign: "center",
     lineHeight: 22,
     marginBottom: 30,
@@ -299,13 +427,27 @@ const styles = StyleSheet.create({
   featureText: {
     fontSize: 14,
     fontFamily: Typography.fontFamily.bodyMedium,
-    color: Colors.textPrimary,
+    color: "rgba(255,255,255,0.8)",
     marginLeft: 12,
+  },
+  featureTickCircle: {
+    alignItems: "center",
+    backgroundColor: "rgba(29,158,117,0.15)",
+    borderRadius: Radius.full,
+    height: 18,
+    justifyContent: "center",
+    width: 18,
+  },
+  featureTick: {
+    color: "#1D9E75",
+    fontFamily: Typography.fontFamily.bodyMedium,
+    fontSize: 11,
+    marginTop: -1,
   },
   primaryButton: {
     backgroundColor: Colors.gold,
     height: 52,
-    borderRadius: 12,
+    borderRadius: Radius.full,
     width: "100%",
     flexDirection: "row",
     alignItems: "center",
@@ -320,16 +462,16 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 18,
     fontFamily: Typography.fontFamily.display,
-    color: Colors.navy,
+    color: "#FFFFFF",
     marginBottom: 15,
   },
   aiCard: {
-    backgroundColor: "#F3F1FF",
-    borderRadius: 12,
+    backgroundColor: "rgba(127,119,221,0.06)",
+    borderRadius: 20,
     padding: 16,
     marginBottom: 20,
-    borderWidth: 1,
-    borderColor: Colors.purple,
+    borderWidth: 0.5,
+    borderColor: "rgba(127,119,221,0.2)",
   },
   aiHeader: {
     flexDirection: "row",
@@ -339,14 +481,14 @@ const styles = StyleSheet.create({
   aiLabel: {
     fontSize: 12,
     fontFamily: Typography.fontFamily.display,
-    color: Colors.purple,
+    color: "#7F77DD",
     marginLeft: 8,
     letterSpacing: 1,
   },
   aiText: {
     fontSize: 15,
     fontFamily: Typography.fontFamily.body,
-    color: Colors.textPrimary,
+    color: "rgba(255,255,255,0.8)",
     lineHeight: 22,
   },
   grid: {
@@ -356,48 +498,141 @@ const styles = StyleSheet.create({
   },
   scoreCard: {
     width: "100%",
-    backgroundColor: Colors.navy,
+    backgroundColor: "#0D1B35",
     padding: 20,
-    borderRadius: 16,
+    borderRadius: 24,
     marginBottom: 15,
     alignItems: "center",
   },
   scoreLabel: {
-    fontSize: 14,
+    fontSize: 12,
     fontFamily: Typography.fontFamily.bodyMedium,
-    color: Colors.textMuted,
-    marginBottom: 5,
+    color: "rgba(255,255,255,0.4)",
+    marginBottom: Spacing.xs,
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
   },
   scoreValue: {
-    fontSize: 32,
-    fontFamily: Typography.fontFamily.display,
+    fontSize: 34,
+    fontFamily: Typography.fontFamily.displaySemiBold,
     color: Colors.gold,
   },
   optCard: {
     width: "48%",
-    backgroundColor: Colors.card,
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 15,
+    backgroundColor: "#1A1A1A",
+    borderRadius: 16,
+    padding: Spacing.lg,
+    marginBottom: Spacing.md,
     borderWidth: 0.5,
-    borderColor: Colors.border,
-    elevation: 2,
+    borderColor: "#2A2A2A",
   },
   optTitle: {
-    fontSize: 12,
+    fontSize: 11,
     fontFamily: Typography.fontFamily.bodyMedium,
-    color: Colors.textSecondary,
-    marginBottom: 8,
+    color: "rgba(255,255,255,0.4)",
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+    marginBottom: Spacing.sm,
   },
   optHighlight: {
     fontSize: 18,
-    fontFamily: Typography.fontFamily.display,
-    color: Colors.navy,
-    marginBottom: 4,
+    fontFamily: Typography.fontFamily.displaySemiBold,
+    color: "#FFFFFF",
+    marginBottom: Spacing.xs,
   },
   optSub: {
     fontSize: 11,
     fontFamily: Typography.fontFamily.body,
     color: Colors.teal,
   },
+  sipCard: {
+  backgroundColor: Colors.card,
+  borderRadius: Radius.lg,
+  padding: Spacing.xl,
+  borderWidth: 0.5,
+  borderColor: Colors.border,
+  gap: Spacing.md,
+},
+sipTitle: {
+  fontSize: 16,
+  fontFamily: Typography.fontFamily.display,
+  color: Colors.navy,
+},
+sipReason: {
+  fontSize: 13,
+  fontFamily: Typography.fontFamily.body,
+  color: Colors.textSecondary,
+  lineHeight: 20,
+},
+sipRow: {
+  flexDirection: "row",
+  alignItems: "center",
+  marginTop: 4,
+},
+sipCol: {
+  flex: 1,
+  alignItems: "center",
+  gap: 4,
+},
+sipDivider: {
+  width: 0.5,
+  height: 40,
+  backgroundColor: Colors.border,
+},
+sipName: {
+  fontSize: 13,
+  fontFamily: Typography.fontFamily.bodyMedium,
+  color: Colors.textSecondary,
+},
+sipAmount: {
+  fontSize: 18,
+  fontFamily: Typography.fontFamily.display,
+  color: Colors.navy,
+},
+insuranceCard: {
+  backgroundColor: "#F0FDF4",
+  borderRadius: 16,
+  padding: 20,
+  borderWidth: 0.5,
+  borderColor: "#86EFAC",
+  gap: 8,
+},
+insuranceTitle: {
+  fontSize: 14,
+  fontFamily: Typography.fontFamily.display,
+  color: Colors.navy,
+  textTransform: "uppercase",
+  letterSpacing: 1,
+},
+insuranceType: {
+  fontSize: 18,
+  fontFamily: Typography.fontFamily.display,
+  color: Colors.navy,
+},
+insuranceReason: {
+  fontSize: 13,
+  fontFamily: Typography.fontFamily.body,
+  color: Colors.textSecondary,
+  lineHeight: 20,
+},
+insuranceAction: {
+  fontSize: 13,
+  fontFamily: Typography.fontFamily.bodyMedium,
+  color: Colors.teal,
+  lineHeight: 20,
+},
+editButton: {
+  backgroundColor: Colors.surface,
+  borderRadius: 12,
+  borderWidth: 0.5,
+  borderColor: Colors.border,
+  height: 48,
+  alignItems: "center",
+  justifyContent: "center",
+},
+editButtonText: {
+  fontSize: 14,
+  fontFamily: Typography.fontFamily.display,
+  color: Colors.textPrimary,
+},
 });

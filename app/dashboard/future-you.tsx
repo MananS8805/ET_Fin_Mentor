@@ -4,16 +4,25 @@ import { router } from "expo-router";
 import * as Animatable from "react-native-animatable";
 import * as Sharing from "expo-sharing";
 import ViewShot from "react-native-view-shot";
-import { VictoryAxis, VictoryBar, VictoryChart, VictoryLine, VictoryArea, VictoryTheme } from "victory-native";
+import ConfettiCannon from "react-native-confetti-cannon";
+import { VictoryChart, VictoryTheme } from "victory-native";
+import Animated, {
+  Easing,
+  runOnJS,
+  useAnimatedReaction,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
 
-import { AnimatedCurrencyValue } from "../../src/components/AnimatedCurrencyValue";
+import { LiquidProgressBar } from "../../src/components/LiquidProgressBar";
+import { VictoryAxisWrapper, VictoryBarWrapper, VictoryLineWrapper } from "../../src/components/VictoryWrappers";
 import { Button } from "../../src/components/Button";
 import { Screen } from "../../src/components/Screen";
 import { SliderField } from "../../src/components/SliderField";
 import { AuthService } from "../../src/core/services/AuthService";
 import {
   FutureMilestone,
-  UserProfileData,
   formatINR,
   getFireCorpusTarget,
   getFutureMilestones,
@@ -27,16 +36,37 @@ import { useAppStore } from "../../src/core/services/store";
 import { Colors, Radius, Spacing, Typography } from "../../src/core/theme";
 
 const MILESTONE_COLORS: Record<FutureMilestone["key"], string> = {
-  emergency: Colors.teal,
-  halfFire: Colors.gold,
-  fullFire: Colors.purple,
+  emergency: "#1D9E75",
+  halfFire: "#D4AF37",
+  fullFire: "#7F77DD",
 };
+
+function AnimatedProjectionValue({ value }: { value: number }) {
+  const animatedValue = useSharedValue(0);
+  const [displayValue, setDisplayValue] = useState(0);
+
+  useEffect(() => {
+    animatedValue.value = 0;
+    animatedValue.value = withTiming(value, { duration: 1000, easing: Easing.out(Easing.cubic) });
+  }, [animatedValue, value]);
+
+  useAnimatedReaction(
+    () => Math.round(animatedValue.value),
+    (next, prev) => {
+      if (next !== prev) {
+        runOnJS(setDisplayValue)(next);
+      }
+    },
+    [animatedValue]
+  );
+
+  return <Text style={styles.projectionValue}>{formatINR(displayValue, true)}</Text>;
+}
 
 function EmptyState() {
   return (
     <Screen scroll>
       <View style={styles.hero}>
-        {/* Removed Day 5 */}
         <Text style={styles.title}>Future You Mirror</Text>
         <Text style={styles.subtitle}>
           Finish onboarding first so the app can project your future corpus using your real SIP, corpus, retirement
@@ -58,9 +88,20 @@ function EmptyState() {
 
 function MilestoneCard({ milestone }: { milestone: FutureMilestone }) {
   const color = MILESTONE_COLORS[milestone.key];
+  const progressValue = useSharedValue(0);
+  const targetProgress = Math.max(milestone.progress * 100, milestone.complete ? 100 : 6);
+
+  useEffect(() => {
+    progressValue.value = 0;
+    progressValue.value = withTiming(targetProgress, { duration: 800, easing: Easing.out(Easing.cubic) });
+  }, [progressValue, targetProgress]);
+
+  const fillStyle = useAnimatedStyle(() => ({
+    width: `${progressValue.value}%`,
+  }));
 
   return (
-    <View style={styles.milestoneCard}>
+    <View style={[styles.milestoneCard, { borderLeftColor: color }]}> 
       <View style={styles.milestoneHeader}>
         <Text style={styles.milestoneTitle}>{milestone.label}</Text>
         <Text style={[styles.milestoneStatus, { color }]}>
@@ -72,12 +113,12 @@ function MilestoneCard({ milestone }: { milestone: FutureMilestone }) {
         {formatINR(milestone.current, true)} / {formatINR(milestone.target, true)}
       </Text>
       <View style={styles.progressTrack}>
-        <View
+        <Animated.View
           style={[
             styles.progressFill,
+            fillStyle,
             {
               backgroundColor: color,
-              width: `${Math.max(milestone.progress * 100, milestone.complete ? 100 : 6)}%`,
             },
           ]}
         />
@@ -98,6 +139,7 @@ export default function FutureYouTab() {
   const [narrativeLoading, setNarrativeLoading] = useState(false);
   const [narrativeError, setNarrativeError] = useState("");
   const [sharing, setSharing] = useState(false);
+  const narrativeOpacity = useSharedValue(0);
 
   const currentProfile = profile;
   const minTargetAge = currentProfile ? Math.min(70, currentProfile.age + 5) : 35;
@@ -129,6 +171,7 @@ export default function FutureYouTab() {
   const passiveIncome = useMemo(() => getMonthlyPassiveIncome(projectedCorpus), [projectedCorpus]);
   const fireAchieved = fireTarget > 0 && projectedCorpus >= fireTarget;
   const fireGap = Math.max(0, fireTarget - projectedCorpus);
+  const fireProgress = fireTarget > 0 ? Math.min(projectedCorpus / fireTarget, 1) : 0;
   const milestones = useMemo(
     () => (currentProfile ? getFutureMilestones(currentProfile, projectedCorpus) : []),
     [currentProfile, projectedCorpus]
@@ -145,6 +188,17 @@ export default function FutureYouTab() {
     [cagr, currentProfile, fireTarget, projectedCorpus, selectedAge, sipMultiplier]
   );
   const chartWidth = Math.max(320, width - Spacing["3xl"]);
+
+  useEffect(() => {
+    if (!narrativeLoading && (narrative || fallbackNarrative)) {
+      narrativeOpacity.value = 0;
+      narrativeOpacity.value = withTiming(1, { duration: 600, easing: Easing.out(Easing.cubic) });
+    }
+  }, [fallbackNarrative, narrative, narrativeLoading, narrativeOpacity]);
+
+  const narrativeAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: narrativeOpacity.value,
+  }));
 
   useEffect(() => {
     if (!currentProfile) {
@@ -174,7 +228,6 @@ export default function FutureYouTab() {
           }
         } catch (error) {
           if (active) {
-            // On error, use fallback and show error message
             const fallback = getFutureYouFallbackNarrative(
               currentProfile,
               selectedAge,
@@ -184,7 +237,11 @@ export default function FutureYouTab() {
               cagr
             );
             setNarrative(fallback);
-            setNarrativeError(error instanceof Error ? error.message : "Unable to generate AI narrative. Showing default instead.");
+            const errorMsg = error instanceof Error ? error.message : "Using offline narrative";
+            setNarrativeError(errorMsg);
+            if (!(error instanceof Error && /offline|configured|api key/i.test(error.message))) {
+              console.warn("[FutureYou] Narrative generation failed:", error);
+            }
           }
         } finally {
           if (active) {
@@ -198,7 +255,7 @@ export default function FutureYouTab() {
       active = false;
       clearTimeout(timer);
     };
-  }, [currentProfile, selectedAge, sipMultiplier, cagr, projectedCorpus, fireTarget]);
+  }, [currentProfile?.id, currentProfile?.monthlySIP, selectedAge, sipMultiplier, cagr, projectedCorpus, fireTarget]);
 
   if (!currentProfile) {
     return <EmptyState />;
@@ -234,7 +291,9 @@ export default function FutureYouTab() {
         dialogTitle: `Share your age ${selectedAge} Future You card`,
       });
     } catch (error) {
-      Alert.alert("Unable to share projection", error instanceof Error ? error.message : "Please try again.");
+      const errorMsg = error instanceof Error ? error.message : "Please try again.";
+      Alert.alert("Unable to share projection", errorMsg);
+      console.error("[FutureYou] Share error:", error);
     } finally {
       setSharing(false);
     }
@@ -243,7 +302,6 @@ export default function FutureYouTab() {
   return (
     <Screen scroll>
       <Animatable.View animation="fadeInUp" duration={500} style={styles.hero}>
-        {/* Removed Day 5 */}
         <Text style={styles.title}>Future You Mirror</Text>
         <Text style={styles.subtitle}>
           Drag ahead in time, stress-test your SIP, and see how close this path gets you to financial independence.
@@ -251,10 +309,17 @@ export default function FutureYouTab() {
       </Animatable.View>
 
       <Animatable.View animation="fadeInUp" delay={90} duration={500} style={styles.projectionCard}>
+        {fireAchieved ? (
+          <View pointerEvents="none" style={styles.confettiMask}>
+            <ConfettiCannon count={28} fadeOut fallSpeed={1700} origin={{ x: 120, y: -8 }} />
+          </View>
+        ) : null}
         <View style={styles.projectionHeader}>
           <View>
             <Text style={styles.projectionLabel}>Projected net worth at age {selectedAge}</Text>
-            <AnimatedCurrencyValue style={styles.projectionValue} value={projectedCorpus} />
+            <View style={styles.glowWrap}>
+              <AnimatedProjectionValue value={projectedCorpus} />
+            </View>
           </View>
           
           <Text style={[styles.statusBadge, fireAchieved ? styles.statusBadgeSuccess : styles.statusBadgeBuilding]}>
@@ -273,6 +338,8 @@ export default function FutureYouTab() {
             <Text style={styles.metricValue}>{formatINR(scenarioSip)}/month</Text>
           </View>
         </View>
+
+        <LiquidProgressBar label={fireAchieved ? "Ahead of plan" : "FIRE readiness"} progress={fireProgress} />
 
         <Text style={styles.projectionBody}>
           {fireAchieved
@@ -296,6 +363,7 @@ export default function FutureYouTab() {
             rangeLabel={`${minTargetAge} to ${maxTargetAge} years`}
             value={selectedAge}
             valueLabel={`${selectedAge} years`}
+            variant="fire-dark"
           />
           <SliderField
             helper={`Current SIP of ${formatINR(currentProfile.monthlySIP)} grows or shrinks here.`}
@@ -307,7 +375,9 @@ export default function FutureYouTab() {
             step={0.1}
             value={sipMultiplier}
             valueLabel={`${sipMultiplier.toFixed(1)}x`}
+            variant="fire-dark"
           />
+          <Text style={styles.centerControlValue}>{sipMultiplier.toFixed(1)}x</Text>
           <SliderField
             helper="Try different long-term return assumptions to pressure-test the outcome."
             label="Expected CAGR"
@@ -318,7 +388,9 @@ export default function FutureYouTab() {
             step={0.01}
             value={cagr}
             valueLabel={`${(cagr * 100).toFixed(0)}%`}
+            variant="fire-dark"
           />
+          <Text style={styles.centerControlValue}>{(cagr * 100).toFixed(0)}%</Text>
         </View>
       </Animatable.View>
 
@@ -345,7 +417,7 @@ export default function FutureYouTab() {
             theme={VictoryTheme.material}
             width={chartWidth}
           >
-            <VictoryAxis
+            <VictoryAxisWrapper
               style={{
                 axis: { stroke: Colors.border },
                 grid: { stroke: "transparent" },
@@ -356,9 +428,9 @@ export default function FutureYouTab() {
                 },
               }}
             />
-            <VictoryAxis
+            <VictoryAxisWrapper
               dependentAxis
-              tickFormat={(value) => formatINR(value, true)}
+              tickFormat={(value: number) => formatINR(value, true)}
               style={{
                 axis: { stroke: "transparent" },
                 grid: { stroke: "#E8EDF4" },
@@ -369,20 +441,22 @@ export default function FutureYouTab() {
                 },
               }}
             />
-            <VictoryBar
+            <VictoryBarWrapper
+              animate={{ duration: 1000, onLoad: { duration: 700 } }}
               barRatio={0.72}
               cornerRadius={{ top: 6 }}
               data={chartData}
               style={{
                 data: {
-                  fill: ({ datum }) => (datum.highlighted ? Colors.gold : "#AFC4E5"),
+                  fill: ({ datum }: { datum: any }) => (datum.highlighted ? "#D4AF37" : "#2A4A7F"),
                 },
               }}
               x="age"
               y="corpus"
             />
             
-            <VictoryLine
+            <VictoryLineWrapper
+  animate={{ duration: 1050, onLoad: { duration: 760 } }}
   data={chartData.map((d) => ({ age: d.age, target: fireTarget }))}
   style={{ data: { stroke: Colors.red, strokeDasharray: "6,4", strokeWidth: 1.5, opacity: 0.7 } }}
   x="age"
@@ -394,18 +468,30 @@ export default function FutureYouTab() {
 
       <Animatable.View animation="fadeInUp" delay={320} duration={500} style={styles.section}>
         <Text style={styles.sectionTitle}>AI narrative</Text>
-        <View style={styles.narrativeCard}>
+        <Animated.View style={[styles.narrativeCard, narrativeAnimatedStyle]}>
+          <View style={styles.aiBadge}>
+            <Text style={styles.aiBadgeText}>AI</Text>
+          </View>
           {narrativeLoading ? <Text style={styles.loadingText}>FinMentor is writing your future note...</Text> : null}
           {narrativeError ? <Text style={styles.warningText}>{narrativeError}</Text> : null}
           <Text style={styles.narrativeText}>{narrative || fallbackNarrative}</Text>
-        </View>
+        </Animated.View>
       </Animatable.View>
 
       <Animatable.View animation="fadeInUp" delay={380} duration={500} style={styles.section}>
         <View style={styles.shareCard}>
           <View style={styles.shareHeader}>
             <Text style={styles.shareTitle}>Secure share card</Text>
-            <Button label="Share Card" loading={sharing} onPress={() => void handleShare()} />
+            <Button
+              label="Share Card"
+              loading={sharing}
+              onPress={() => {
+                handleShare().catch((e) => {
+                  Alert.alert("Unable to share card", e instanceof Error ? e.message : "Please try again.");
+                });
+              }}
+              style={styles.shareButton}
+            />
           </View>
           <Text style={styles.shareBody}>
             This detailed card includes your projected corpus at age {selectedAge}, so biometric confirmation is
@@ -447,53 +533,74 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   title: {
-    color: Colors.textPrimary,
-    fontFamily: Typography.fontFamily.display,
-    fontSize: Typography.size["2xl"],
+    color: "#FFFFFF",
+    fontFamily: Typography.fontFamily.displaySemiBold,
+    fontSize: 28,
+    letterSpacing: -0.5,
   },
   subtitle: {
-    color: Colors.textSecondary,
+    color: "rgba(255,255,255,0.4)",
     fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.md,
-    lineHeight: 24,
+    fontSize: 14,
+    lineHeight: 20,
   },
   projectionCard: {
-    backgroundColor: Colors.navy,
-    borderRadius: Radius.lg,
+    backgroundColor: "#0D1B35",
+    borderRadius: 24,
     borderWidth: 0.5,
-    borderColor: "rgba(12,35,64,0.14)",
+    borderColor: "rgba(255,255,255,0.06)",
     gap: Spacing.lg,
     marginBottom: Spacing.xl,
+    overflow: "hidden",
     padding: Spacing.xl,
+  },
+  confettiMask: {
+    bottom: 0,
+    left: 0,
+    position: "absolute",
+    right: 0,
+    top: 0,
   },
   projectionHeader: {
     gap: Spacing.md,
   },
   projectionLabel: {
-    color: "rgba(255,255,255,0.72)",
+    color: "rgba(255,255,255,0.4)",
     fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.sm,
+    fontSize: 12,
+    letterSpacing: 0.8,
     marginBottom: Spacing.sm,
+    textTransform: "uppercase",
   },
   projectionValue: {
-    color: Colors.white,
+    color: "#FFFFFF",
     fontFamily: Typography.fontFamily.numeric,
-    fontSize: Typography.size["3xl"],
+    fontSize: 40,
+    fontWeight: "700",
+    letterSpacing: -1,
+  },
+  glowWrap: {
+    alignSelf: "flex-start",
+    justifyContent: "center",
+    minHeight: 54,
   },
   statusBadge: {
     alignSelf: "flex-start",
+    borderWidth: 0.5,
     borderRadius: Radius.full,
     overflow: "hidden",
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
   },
   statusBadgeBuilding: {
-    backgroundColor: "rgba(245,166,35,0.18)",
-    color: Colors.gold,
+    backgroundColor: "rgba(212,175,55,0.15)",
+    borderColor: "rgba(212,175,55,0.3)",
+    color: "#D4AF37",
   },
   statusBadgeSuccess: {
-    backgroundColor: "rgba(29,158,117,0.18)",
-    color: Colors.teal,
+    backgroundColor: "rgba(29,158,117,0.15)",
+    borderColor: "rgba(29,158,117,0.3)",
+    color: "#1D9E75",
   },
   metricRow: {
     flexDirection: "row",
@@ -501,7 +608,7 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
   },
   metricChip: {
-    backgroundColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "rgba(255,255,255,0.05)",
     borderRadius: Radius.md,
     borderWidth: 0.5,
     borderColor: "rgba(255,255,255,0.08)",
@@ -521,31 +628,43 @@ const styles = StyleSheet.create({
     fontSize: Typography.size.lg,
   },
   projectionBody: {
-    color: "rgba(255,255,255,0.8)",
+    color: "rgba(255,255,255,0.65)",
     fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.md,
-    lineHeight: 24,
+    fontSize: 13,
+    lineHeight: 20,
   },
   section: {
     gap: Spacing.md,
     marginBottom: Spacing.xl,
   },
   sectionTitle: {
-    color: Colors.textPrimary,
+    color: "#FFFFFF",
     fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.lg,
+    fontSize: 16,
   },
   sliderStack: {
-    gap: Spacing.md,
+    gap: Spacing.sm,
+  },
+  centerControlValue: {
+    alignSelf: "center",
+    color: "#D4AF37",
+    fontFamily: Typography.fontFamily.numeric,
+    fontSize: 24,
+    fontWeight: "700",
+    marginBottom: Spacing.sm,
   },
   milestoneStack: {
     gap: Spacing.md,
   },
   milestoneCard: {
-    backgroundColor: Colors.card,
-    borderRadius: Radius.lg,
+    backgroundColor: "#1A1A1A",
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 16,
+    borderLeftWidth: 3,
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 16,
     borderWidth: 0.5,
-    borderColor: Colors.border,
+    borderColor: "#2A2A2A",
     gap: Spacing.sm,
     padding: Spacing.lg,
   },
@@ -555,7 +674,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   milestoneTitle: {
-    color: Colors.textPrimary,
+    color: "#FFFFFF",
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.md,
   },
@@ -564,19 +683,19 @@ const styles = StyleSheet.create({
     fontSize: Typography.size.sm,
   },
   milestoneHelper: {
-    color: Colors.textSecondary,
+    color: "rgba(255,255,255,0.4)",
     fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.sm,
+    fontSize: 12,
   },
   milestoneValue: {
-    color: Colors.navy,
+    color: "#FFFFFF",
     fontFamily: Typography.fontFamily.displaySemiBold,
-    fontSize: Typography.size.md,
+    fontSize: 14,
   },
   progressTrack: {
-    backgroundColor: "#E8EDF4",
+    backgroundColor: "rgba(255,255,255,0.06)",
     borderRadius: Radius.full,
-    height: 10,
+    height: 6,
     overflow: "hidden",
   },
   progressFill: {
@@ -584,30 +703,42 @@ const styles = StyleSheet.create({
     height: "100%",
   },
   chartCard: {
-    backgroundColor: Colors.card,
-    borderRadius: Radius.lg,
+    backgroundColor: "#1A1A1A",
+    borderRadius: 20,
     borderWidth: 0.5,
-    borderColor: Colors.border,
+    borderColor: "#2A2A2A",
     overflow: "hidden",
     paddingVertical: Spacing.lg,
   },
   chartBody: {
-    color: Colors.textSecondary,
+    color: "rgba(255,255,255,0.35)",
     fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.sm,
+    fontSize: 12,
     lineHeight: 22,
     paddingHorizontal: Spacing.lg,
   },
   narrativeCard: {
-    backgroundColor: Colors.card,
-    borderRadius: Radius.lg,
+    backgroundColor: "rgba(127,119,221,0.06)",
+    borderRadius: 20,
     borderWidth: 0.5,
-    borderColor: Colors.border,
+    borderColor: "rgba(127,119,221,0.2)",
     gap: Spacing.sm,
-    padding: Spacing.xl,
+    padding: 20,
+  },
+  aiBadge: {
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(127,119,221,0.15)",
+    borderRadius: Radius.full,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 4,
+  },
+  aiBadgeText: {
+    color: "#7F77DD",
+    fontFamily: Typography.fontFamily.bodyMedium,
+    fontSize: 11,
   },
   loadingText: {
-    color: Colors.purple,
+    color: "#7F77DD",
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.sm,
   },
@@ -617,16 +748,16 @@ const styles = StyleSheet.create({
     fontSize: Typography.size.sm,
   },
   narrativeText: {
-    color: Colors.textPrimary,
+    color: "rgba(255,255,255,0.8)",
     fontFamily: Typography.fontFamily.body,
     fontSize: Typography.size.md,
     lineHeight: 24,
   },
   shareCard: {
-    backgroundColor: "#EEF5FF",
-    borderRadius: Radius.lg,
+    backgroundColor: "rgba(212,175,55,0.06)",
+    borderRadius: 20,
     borderWidth: 0.5,
-    borderColor: "#D8E4F5",
+    borderColor: "rgba(212,175,55,0.2)",
     gap: Spacing.md,
     padding: Spacing.xl,
   },
@@ -636,15 +767,18 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   shareTitle: {
-    color: Colors.navy,
+    color: "#FFFFFF",
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.lg,
   },
   shareBody: {
-    color: Colors.textSecondary,
+    color: "rgba(255,255,255,0.75)",
     fontFamily: Typography.fontFamily.body,
     fontSize: Typography.size.sm,
     lineHeight: 22,
+  },
+  shareButton: {
+    borderRadius: 99,
   },
   captureContainer: {
     left: -9999,

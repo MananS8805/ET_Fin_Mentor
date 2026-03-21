@@ -1,11 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { ActivityIndicator, Alert, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { router } from "expo-router";
 import * as Animatable from "react-native-animatable";
 import * as Sharing from "expo-sharing";
 import ViewShot from "react-native-view-shot";
-import { VictoryAxis, VictoryBar, VictoryChart, VictoryLine, VictoryTheme } from "victory-native";
+import { VictoryChart, VictoryTheme } from "victory-native";
+import Animated, {
+  Easing,
+  FadeInUp,
+  runOnJS,
+  useAnimatedReaction,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from "react-native-reanimated";
 
+import { LiquidProgressBar } from "../../src/components/LiquidProgressBar";
+import { VictoryAxisWrapper, VictoryLineWrapper } from "../../src/components/VictoryWrappers";
 import { AnimatedCurrencyValue } from "../../src/components/AnimatedCurrencyValue";
 import { Button } from "../../src/components/Button";
 import { Screen } from "../../src/components/Screen";
@@ -13,7 +25,6 @@ import { SliderField } from "../../src/components/SliderField";
 import { AuthService } from "../../src/core/services/AuthService";
 import {
   AssetAllocationStage,
-  GoalSIPAllocation,
   UserProfileData,
   createEmptyUserProfile,
   createIncomeScenarioProfile,
@@ -31,7 +42,8 @@ import {
   getSIPAllocationByGoal,
 
 } from "../../src/core/models/UserProfile";
-import { GeminiService } from "../../src/core/services/GeminiService";
+import { GeminiService, requestGemini } from "../../src/core/services/GeminiService";
+import { AppConfig } from "../../src/core/config";
 import { useAppStore } from "../../src/core/services/store";
 import { Colors, Radius, Spacing, Typography } from "../../src/core/theme";
 
@@ -39,7 +51,6 @@ function EmptyState() {
   return (
     <Screen scroll>
       <View style={styles.hero}>
-        {/* Removed Day 6 */}
         <Text style={styles.title}>FIRE Planner + Tax Battle</Text>
         <Text style={styles.subtitle}>
           Finish onboarding first so the planner can use your actual corpus, SIP, deductions, and retirement target.
@@ -57,27 +68,57 @@ function EmptyState() {
   );
 }
 
-function AllocationCard({ item }: { item: AssetAllocationStage }) {
+function AllocationCard({ item, index }: { item: AssetAllocationStage; index: number }) {
   return (
-    <View style={styles.allocationCard}>
+    <Animated.View entering={FadeInUp.delay(index * 80).duration(420)} style={styles.allocationCard}>
       <Text style={styles.allocationTitle}>{item.label}</Text>
       <Text style={styles.allocationHelper}>{item.helper}</Text>
       <View style={styles.allocationGrid}>
-        <View style={styles.allocationChip}>
-          <Text style={styles.allocationLabel}>Equity</Text>
-          <Text style={styles.allocationValue}>{item.equity}%</Text>
+        <View style={[styles.allocationChip, styles.allocationChipEquity]}>
+          <Text style={[styles.allocationLabel, styles.allocationLabelEquity]}>Equity</Text>
+          <Text style={[styles.allocationValue, styles.allocationValueEquity]}>{item.equity}%</Text>
         </View>
-        <View style={styles.allocationChip}>
-          <Text style={styles.allocationLabel}>Debt</Text>
-          <Text style={styles.allocationValue}>{item.debt}%</Text>
+        <View style={[styles.allocationChip, styles.allocationChipDebt]}>
+          <Text style={[styles.allocationLabel, styles.allocationLabelDebt]}>Debt</Text>
+          <Text style={[styles.allocationValue, styles.allocationValueDebt]}>{item.debt}%</Text>
         </View>
-        <View style={styles.allocationChip}>
-          <Text style={styles.allocationLabel}>Gold</Text>
-          <Text style={styles.allocationValue}>{item.gold}%</Text>
+        <View style={[styles.allocationChip, styles.allocationChipGold]}>
+          <Text style={[styles.allocationLabel, styles.allocationLabelGold]}>Gold</Text>
+          <Text style={[styles.allocationValue, styles.allocationValueGold]}>{item.gold}%</Text>
         </View>
       </View>
-    </View>
+    </Animated.View>
   );
+}
+
+function AnimatedSummaryNumber({
+  value,
+  formatter,
+  style,
+}: {
+  value: number;
+  formatter: (value: number) => string;
+  style: any;
+}) {
+  const animatedValue = useSharedValue(0);
+  const [displayValue, setDisplayValue] = useState(0);
+
+  useEffect(() => {
+    animatedValue.value = 0;
+    animatedValue.value = withTiming(value, { duration: 1000, easing: Easing.out(Easing.cubic) });
+  }, [animatedValue, value]);
+
+  useAnimatedReaction(
+    () => Math.round(animatedValue.value),
+    (next, prev) => {
+      if (next !== prev) {
+        runOnJS(setDisplayValue)(next);
+      }
+    },
+    [animatedValue]
+  );
+
+  return <Text style={style}>{formatter(displayValue)}</Text>;
 }
 
 function buildTaxFallbackNarrative(
@@ -102,6 +143,7 @@ function buildTaxFallbackNarrative(
 
 export default function FirePlannerTab() {
   const profile = useAppStore((state) => state.currentProfile);
+  const portfolioXRay = useAppStore((state) => state.portfolioXRay);
   const shareCardRef = useRef<ViewShot | null>(null);
   const { width } = useWindowDimensions();
 
@@ -129,6 +171,26 @@ export default function FirePlannerTab() {
   const plannerRetirementAge = retirementAge || defaultRetirementAge;
   const plannerTargetExpense = targetExpense || defaultTargetExpense;
   const taxAnnualIncome = salaryAnnual || defaultAnnualIncome;
+  const [roadmap, setRoadmap] = useState<string[]>([]);
+  const [roadmapLoading, setRoadmapLoading] = useState(false);
+  const [roadmapError, setRoadmapError] = useState("");
+  const heroY = useSharedValue(30);
+  const heroOpacity = useSharedValue(0);
+  const winnerScale = useSharedValue(0);
+
+  useEffect(() => {
+    heroY.value = withTiming(0, { duration: 500, easing: Easing.out(Easing.cubic) });
+    heroOpacity.value = withTiming(1, { duration: 500, easing: Easing.out(Easing.cubic) });
+  }, [heroOpacity, heroY]);
+
+  const heroAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: heroOpacity.value,
+    transform: [{ translateY: heroY.value }],
+  }));
+
+  const winnerBadgeAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: winnerScale.value }],
+  }));
 
   useEffect(() => {
     if (!currentProfile) {
@@ -180,7 +242,14 @@ export default function FirePlannerTab() {
     () => (currentProfile ? getSIPAllocationByGoal(currentProfile) : []),
     [currentProfile]
   );
+  const goalsSummary = useMemo(
+    () => (currentProfile?.goals?.length ? currentProfile.goals.join(", ") : "No explicit goals"),
+    [currentProfile?.goals]
+  );
+  const targetEquity = allocationSchedule[0]?.equity || 70;
   const chartWidth = Math.max(320, width - Spacing["3xl"]);
+  const totalPortfolioValue = portfolioXRay?.totalValue ?? currentProfile?.existingCorpus ?? 0;
+  const corpusProgress = fireTarget > 0 ? Math.min(projectedRetirementCorpus / fireTarget, 1) : 0;
 
   const taxScenarioProfile = useMemo(
     () => (currentProfile ? createIncomeScenarioProfile(currentProfile, taxAnnualIncome) : null),
@@ -193,12 +262,118 @@ export default function FirePlannerTab() {
     [taxScenarioProfile]
   );
   const taxSaving = useMemo(() => (taxScenarioProfile ? getTaxSaving(taxScenarioProfile) : 0), [taxScenarioProfile]);
+  useEffect(() => {
+    winnerScale.value = 0;
+    winnerScale.value = withSpring(1, { damping: 12, stiffness: 170 });
+  }, [betterRegime, winnerScale]);
+
   const taxFallbackNarrative = useMemo(
     () => buildTaxFallbackNarrative(taxAnnualIncome, betterRegime, taxSaving, oldTax, newTax),
     [betterRegime, newTax, oldTax, taxAnnualIncome, taxSaving]
   );
 
-  
+  useEffect(() => {
+    if (!currentProfile || !plannerProfile) return;
+
+    if (!AppConfig.isGeminiConfigured() && !AppConfig.isGroqConfigured()) {
+      setRoadmap([]);
+      setRoadmapError("AI roadmap is offline. Add Gemini or Groq key in .env to enable personalized roadmap generation.");
+      setRoadmapLoading(false);
+      return;
+    }
+
+    let active = true;
+
+    const generateRoadmap = async () => {
+      try {
+        setRoadmapLoading(true);
+        setRoadmapError("");
+
+        const data = await requestGemini({
+          system_instruction: {
+            parts: [{ text: buildSystemInstruction(currentProfile) }],
+          },
+          contents: [
+            {
+              role: "user",
+              parts: [
+                {
+                  text: [
+                    "Generate a personalized 12-month FIRE action roadmap for this investor.",
+                    "Return ONLY a JSON array of exactly 12 strings — one action per month.",
+                    "No markdown, no preamble, no explanation. Just the raw JSON array.",
+                    "Each string must be one specific actionable sentence using the user's actual numbers.",
+                    "Vary the actions — cover SIP step-ups, rebalancing, tax planning, emergency fund, insurance, bonus deployment, and annual review across the 12 months.",
+                    "",
+                    `Current age: ${currentProfile.age}`,
+                    `Retirement age: ${plannerRetirementAge}`,
+                    `Years to FIRE: ${yearsRemaining}`,
+                    `Required SIP: ${formatINR(requiredSip)}/month`,
+                    `Current SIP: ${formatINR(currentProfile.monthlySIP)}/month`,
+                    `SIP gap: ${sipGap > 0 ? formatINR(sipGap) : "none — on track"}`,
+                    `FIRE target corpus: ${formatINR(fireTarget, true)}`,
+                    `Projected corpus at retirement: ${formatINR(projectedRetirementCorpus, true)}`,
+                    `Corpus gap: ${projectionGap > 0 ? formatINR(projectionGap, true) : "none — on track"}`,
+                    `Target equity allocation: ${targetEquity}%`,
+                    `Risk profile: ${currentProfile.riskProfile}`,
+                    `Goals: ${goalsSummary}`,
+                    `Monthly income: ${formatINR(currentProfile.monthlyIncome)}`,
+                    `Emergency fund: ${formatINR(currentProfile.emergencyFund)}`,
+                  ].join("\n"),
+                },
+              ],
+            },
+          ],
+          generationConfig: { temperature: 0.6, maxOutputTokens: 800 },
+        }, { feature: "fire-roadmap" });
+
+        if (!active) return;
+
+        const raw = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+        const cleaned = raw.replace(/```json/gi, "").replace(/```/g, "").trim();
+        const parsed = JSON.parse(cleaned) as string[];
+
+        if (active && Array.isArray(parsed) && parsed.length === 12) {
+          setRoadmap(parsed);
+          setRoadmapError("");
+        }
+      } catch (error) {
+        if (active) {
+          const errorMsg = error instanceof Error ? error.message : "Unable to generate AI roadmap";
+          setRoadmapError(errorMsg);
+          if (!(error instanceof Error && /configured|api key/i.test(error.message))) {
+            console.warn("[FirePlanner] Roadmap generation failed:", error);
+          }
+          // Fallback is handled in render — we show static actions with error message
+        }
+      } finally {
+        if (active) setRoadmapLoading(false);
+      }
+    };
+
+    void generateRoadmap();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    currentProfile?.id,
+    currentProfile?.age,
+    currentProfile?.monthlySIP,
+    currentProfile?.riskProfile,
+    currentProfile?.monthlyIncome,
+    currentProfile?.emergencyFund,
+    goalsSummary,
+    plannerProfile,
+    plannerRetirementAge,
+    requiredSip,
+    fireTarget,
+    projectedRetirementCorpus,
+    sipGap,
+    projectionGap,
+    targetEquity,
+    yearsRemaining,
+  ]);
 
   useEffect(() => {
     if (!currentProfile) {
@@ -276,7 +451,9 @@ export default function FirePlannerTab() {
         dialogTitle: "Export your ET FinMentor FIRE plan",
       });
     } catch (error) {
-      Alert.alert("Unable to export plan", error instanceof Error ? error.message : "Please try again.");
+      const errorMsg = error instanceof Error ? error.message : "Please try again.";
+      Alert.alert("Unable to export plan", errorMsg);
+      console.error("[FirePlanner] Export error:", error);
     } finally {
       setExporting(false);
     }
@@ -284,13 +461,15 @@ export default function FirePlannerTab() {
 
   return (
     <Screen scroll>
-      <Animatable.View animation="fadeInUp" duration={500} style={styles.hero}>
-        {/* Removed Day 6 */}
-        <Text style={styles.title}>FIRE Planner + Tax Battle</Text>
+      <Animated.View style={[styles.hero, heroAnimatedStyle]}>
+        <Text style={styles.title}>FIRE Planner</Text>
         <Text style={styles.subtitle}>
           Tune your retirement age and lifestyle target, then compare tax regimes live against the same deduction base.
         </Text>
-      </Animatable.View>
+        <Animated.View sharedTransitionTag="portfolio-shared-value" style={styles.sharedPortfolioBadge}>
+          <Text style={styles.sharedPortfolioText}>{formatINR(totalPortfolioValue, true)}</Text>
+        </Animated.View>
+      </Animated.View>
 
       <Animatable.View animation="fadeInUp" delay={80} duration={500} style={styles.section}>
         <Text style={styles.sectionTitle}>FIRE inputs</Text>
@@ -304,6 +483,7 @@ export default function FirePlannerTab() {
             rangeLabel={`${minRetirementAge} to ${maxRetirementAge} years`}
             value={plannerRetirementAge}
             valueLabel={`${plannerRetirementAge} years`}
+            variant="fire-dark"
           />
           <SliderField
             helper="Your expected monthly living cost in retirement, in today's rupees."
@@ -315,6 +495,7 @@ export default function FirePlannerTab() {
             step={5_000}
             value={plannerTargetExpense}
             valueLabel={formatINR(plannerTargetExpense, true)}
+            variant="fire-dark"
           />
         </View>
       </Animatable.View>
@@ -323,24 +504,42 @@ export default function FirePlannerTab() {
         <View style={styles.summaryTop}>
           <View style={styles.summaryMetric}>
             <Text style={styles.summaryLabel}>Required SIP</Text>
-            <AnimatedCurrencyValue style={styles.summaryValue} value={requiredSip} />
+            <AnimatedSummaryNumber
+              formatter={(value) => formatINR(value, true)}
+              style={styles.summaryValue}
+              value={requiredSip}
+            />
           </View>
           <View style={styles.summaryMetric}>
             <Text style={styles.summaryLabel}>Years to FIRE</Text>
-            <Text style={styles.summaryValueText}>
-              {yearsToFire === null ? "75+ years" : `${yearsToFire} years`}
-            </Text>
+            <AnimatedSummaryNumber
+              formatter={(value) => `${Math.max(0, value)} years`}
+              style={styles.summaryValueText}
+              value={yearsToFire === null ? 75 : yearsToFire}
+            />
+          </View>
+          <View style={styles.summaryMetric}>
+            <Text style={styles.summaryLabel}>Projected corpus</Text>
+            <AnimatedCurrencyValue style={styles.summaryValueText} value={projectedRetirementCorpus} variant="slot" />
           </View>
         </View>
 
+        <LiquidProgressBar label="Target corpus" progress={corpusProgress} />
+
         <View style={styles.summaryRow}>
-          <View style={styles.summaryPill}>
+          <View style={[styles.summaryPill, styles.targetPill]}>
             <Text style={styles.summaryPillLabel}>Target corpus</Text>
-            <Text style={styles.summaryPillValue}>{formatINR(fireTarget, true)}</Text>
+            <Text style={[styles.summaryPillValue, styles.targetPillValue]}>{formatINR(fireTarget, true)}</Text>
           </View>
-          <View style={styles.summaryPill}>
+          <View style={[
+            styles.summaryPill,
+            sipGap > 0 ? styles.sipGapPillNegative : styles.sipGapPillPositive,
+          ]}>
             <Text style={styles.summaryPillLabel}>Current SIP gap</Text>
-            <Text style={styles.summaryPillValue}>{sipGap > 0 ? formatINR(sipGap) : "Ahead of plan"}</Text>
+            <Text style={[
+              styles.summaryPillValue,
+              sipGap > 0 ? styles.sipGapNegativeText : styles.sipGapPositiveText,
+            ]}>{sipGap > 0 ? formatINR(sipGap) : "Ahead of plan"}</Text>
           </View>
         </View>
 
@@ -361,13 +560,20 @@ export default function FirePlannerTab() {
       </Animatable.View>
               
       <Animatable.View animation="fadeInUp" delay={190} duration={500} style={styles.section}>
-        <Text style={styles.sectionTitle}>Projection chart</Text>
+        <View style={styles.projectionHeaderRow}>
+          <View style={styles.projectionDot} />
+          <Text style={styles.projectionTitle}>Projection</Text>
+        </View>
         {goalBreakdown.length > 0 ? (
         <Animatable.View animation="fadeInUp" delay={160} duration={500} style={styles.section}>
           <Text style={styles.sectionTitle}>SIP by goal</Text>
           <View style={styles.allocationStack}>
-            {goalBreakdown.map((item) => (
-              <View key={item.goal} style={styles.allocationCard}>
+            {goalBreakdown.map((item, index) => (
+              <Animated.View
+                entering={FadeInUp.delay(index * 50).springify().damping(14).stiffness(145)}
+                key={item.goal}
+                style={styles.allocationCard}
+              >
                 <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
                   <Text style={styles.allocationTitle} numberOfLines={1}>{item.goal}</Text>
                   <Text style={styles.allocationValue}>{formatINR(item.sipAmount)}/mo</Text>
@@ -375,7 +581,7 @@ export default function FirePlannerTab() {
                 <Text style={styles.allocationHelper}>
                   {item.horizonYears}yr horizon · target {formatINR(item.targetCorpus, true)}
                 </Text>
-              </View>
+              </Animated.View>
             ))}
           </View>
         </Animatable.View>
@@ -384,11 +590,11 @@ export default function FirePlannerTab() {
           <View style={styles.legendRow}>
             <View style={styles.legendItem}>
               <View style={[styles.legendSwatch, { backgroundColor: Colors.teal }]} />
-              <Text style={styles.legendText}>Projected corpus</Text>
+              <Text style={styles.legendText}>Projected</Text>
             </View>
             <View style={styles.legendItem}>
-              <View style={[styles.legendSwatch, { backgroundColor: Colors.red }]} />
-              <Text style={styles.legendText}>Target corpus</Text>
+              <View style={styles.legendDashSwatch} />
+              <Text style={styles.legendText}>Target</Text>
             </View>
           </View>
           <VictoryChart
@@ -397,38 +603,40 @@ export default function FirePlannerTab() {
             theme={VictoryTheme.material}
             width={chartWidth}
           >
-            <VictoryAxis
+            <VictoryAxisWrapper
               style={{
                 axis: { stroke: Colors.border },
-                grid: { stroke: "transparent" },
+                grid: { stroke: "rgba(255,255,255,0.04)" },
                 tickLabels: {
-                  fill: Colors.textSecondary,
-                  fontFamily: Typography.fontFamily.body,
-                  fontSize: 11,
-                },
-              }}
-            />
-            <VictoryAxis
-              dependentAxis
-              tickFormat={(value) => formatINR(value, true)}
-              style={{
-                axis: { stroke: "transparent" },
-                grid: { stroke: "#E8EDF4" },
-                tickLabels: {
-                  fill: Colors.textSecondary,
+                  fill: "rgba(255,255,255,0.35)",
                   fontFamily: Typography.fontFamily.body,
                   fontSize: 10,
                 },
               }}
             />
-            <VictoryLine
+            <VictoryAxisWrapper
+              dependentAxis
+              tickFormat={(value: number) => formatINR(value, true)}
+              style={{
+                axis: { stroke: "transparent" },
+                grid: { stroke: "rgba(255,255,255,0.04)" },
+                tickLabels: {
+                  fill: "rgba(255,255,255,0.35)",
+                  fontFamily: Typography.fontFamily.body,
+                  fontSize: 10,
+                },
+              }}
+            />
+            <VictoryLineWrapper
+              animate={{ duration: 1100, onLoad: { duration: 800 } }}
               data={projectionSeries}
               interpolation="monotoneX"
               style={{ data: { stroke: Colors.teal, strokeWidth: 3 } }}
               x="age"
               y="projectedCorpus"
             />
-            <VictoryLine
+            <VictoryLineWrapper
+              animate={{ duration: 1150, onLoad: { duration: 850 } }}
               data={projectionSeries}
               style={{ data: { stroke: Colors.red, strokeDasharray: "8,6", strokeWidth: 2 } }}
               x="age"
@@ -441,63 +649,124 @@ export default function FirePlannerTab() {
       <Animatable.View animation="fadeInUp" delay={250} duration={500} style={styles.section}>
         <Text style={styles.sectionTitle}>Asset allocation schedule</Text>
         <View style={styles.allocationStack}>
-          {allocationSchedule.map((item) => (
-            <AllocationCard item={item} key={item.label} />
+          {allocationSchedule.map((item, index) => (
+            <AllocationCard item={item} index={index} key={item.label} />
           ))}
         </View>
       </Animatable.View>
 
       <Animatable.View animation="fadeInUp" delay={280} duration={500} style={styles.section}>
-        <Text style={styles.sectionTitle}>12-Month Roadmap</Text>
-        <View style={{ backgroundColor: Colors.card, borderRadius: Radius.lg, borderWidth: 0.5, borderColor: Colors.border, padding: Spacing.xl }}>
-          {[...Array(12)].map((_, i) => (
-            <View key={i} style={{ flexDirection: "row", borderBottomWidth: i === 11 ? 0 : 0.5, borderBottomColor: Colors.border, paddingVertical: 12 }}>
-              <View style={{ width: 64, justifyContent: "center" }}>
-                <Text style={{ color: Colors.textSecondary, fontFamily: Typography.fontFamily.bodyMedium, fontSize: 13, textTransform: "uppercase" }}>MTH {i + 1}</Text>
-              </View>
-              <View style={{ flex: 1, paddingLeft: 12 }}>
-                <Text style={{ color: Colors.textPrimary, fontFamily: Typography.fontFamily.bodyMedium, fontSize: 15 }}>
-                  Invest {formatINR(requiredSip)}
-                </Text>
-                <Text style={{ color: Colors.textSecondary, fontFamily: Typography.fontFamily.body, fontSize: 13, marginTop: 2 }}>
-                  Split across {goalBreakdown.length > 0 ? goalBreakdown.map(g => g.goal).join(", ") : "Index Funds & Debt"}
-                </Text>
-                {i === 0 && sipGap > 0 && (
-                  <View style={{ backgroundColor: "rgba(245,166,35,0.12)", padding: 8, borderRadius: 6, marginTop: 8 }}>
-                    <Text style={{ color: Colors.gold, fontFamily: Typography.fontFamily.bodyMedium, fontSize: 12 }}>
-                      🚀 Action: Step up SIP by {formatINR(sipGap)} to close your trajectory gap.
-                    </Text>
-                  </View>
-                )}
-                {i === 3 && (
-                  <View style={{ backgroundColor: "rgba(29,158,117,0.12)", padding: 8, borderRadius: 6, marginTop: 8 }}>
-                    <Text style={{ color: Colors.teal, fontFamily: Typography.fontFamily.bodyMedium, fontSize: 12 }}>
-                      ⚖️ Action: Rebalance equity to match {allocationSchedule[0]?.equity || 70}%.
-                    </Text>
-                  </View>
-                )}
-                {i === 6 && (
-                  <View style={{ backgroundColor: "rgba(127,119,221,0.12)", padding: 8, borderRadius: 6, marginTop: 8 }}>
-                    <Text style={{ color: Colors.purple, fontFamily: Typography.fontFamily.bodyMedium, fontSize: 12 }}>
-                      💼 Action: Evaluate corporate bonus and lump-sum into FIRE corpus.
-                    </Text>
-                  </View>
-                )}
-                {i === 11 && (
-                  <View style={{ backgroundColor: "rgba(255,255,255,0.06)", padding: 8, borderRadius: 6, marginTop: 8 }}>
-                    <Text style={{ color: Colors.textSecondary, fontFamily: Typography.fontFamily.bodyMedium, fontSize: 12 }}>
-                      🛡️ Action: Annual review of Term Insurance & Emergency Fund limits.
-                    </Text>
-                  </View>
-                )}
-              </View>
-            </View>
-          ))}
-        </View>
-      </Animatable.View>
+  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: Spacing.md }}>
+    <Text style={styles.sectionTitle}>12-Month Roadmap</Text>
+    {roadmapLoading && (
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <ActivityIndicator size="small" color={Colors.purple} />
+        <Text style={{ color: Colors.purple, fontFamily: Typography.fontFamily.bodyMedium, fontSize: 12 }}>
+          AI generating...
+        </Text>
+      </View>
+    )}
+  </View>
 
+  {roadmapError ? (
+    <View style={{ marginBottom: Spacing.md, backgroundColor: "rgba(239,68,68,0.12)", borderRadius: Radius.md, padding: Spacing.md, borderLeftWidth: 3, borderLeftColor: Colors.red }}>
+      <Text style={{ color: Colors.red, fontFamily: Typography.fontFamily.bodyMedium, fontSize: 13, marginBottom: 6 }}>
+        ⚠️ Offline Roadmap
+      </Text>
+      <Text style={{ color: Colors.textSecondary, fontFamily: Typography.fontFamily.body, fontSize: 12 }}>
+        {roadmapError}. Showing generic monthly actions below.
+      </Text>
+    </View>
+  ) : null}
+
+  <View style={styles.roadmapWrap}>
+    {[...Array(12)].map((_, i) => {
+      const monthNum = i + 1;
+      const isQuarterStart = [1, 4, 7, 10].includes(monthNum);
+      const goalSplit = goalBreakdown.length > 0
+        ? goalBreakdown.slice(0, 2).map(g => g.goal).join(" + ")
+        : "Index Funds & Debt";
+
+      // Use AI-generated action if available, otherwise fall back to static
+      const aiAction = roadmap[i];
+
+      // Static fallback actions
+      const staticActions: Record<number, { label: string; color: string; bg: string }> = {
+        1: sipGap > 0
+          ? { label: `Step up SIP by ${formatINR(sipGap)} to close your corpus gap.`, color: Colors.gold, bg: "rgba(245,166,35,0.12)" }
+          : { label: `Confirm SIP of ${formatINR(requiredSip)} is active and auto-debiting.`, color: Colors.teal, bg: "rgba(29,158,117,0.12)" },
+        2: { label: `Verify last month's SIP was processed successfully.`, color: Colors.textSecondary, bg: "rgba(255,255,255,0.05)" },
+        3: { label: `Tax month — maximize 80C before March 31 deadline.`, color: Colors.purple, bg: "rgba(127,119,221,0.12)" },
+        4: { label: `Q2 rebalance — check equity vs target ${allocationSchedule[0]?.equity || 70}%.`, color: Colors.teal, bg: "rgba(29,158,117,0.12)" },
+        5: { label: `Review underperforming funds against benchmark.`, color: Colors.textSecondary, bg: "rgba(255,255,255,0.05)" },
+        6: { label: `Mid-year check — recalculate FIRE target if income changed.`, color: Colors.purple, bg: "rgba(127,119,221,0.12)" },
+        7: { label: `Q3 rebalance — trim equity if drifted above target.`, color: Colors.teal, bg: "rgba(29,158,117,0.12)" },
+        8: { label: `Step up SIP by 10% to beat inflation drag.`, color: Colors.gold, bg: "rgba(245,166,35,0.12)" },
+        9: { label: `Top up emergency fund if below 6 months of expenses.`, color: Colors.textSecondary, bg: "rgba(255,255,255,0.05)" },
+        10: { label: `Q4 rebalance — final equity trim before year end.`, color: Colors.teal, bg: "rgba(29,158,117,0.12)" },
+        11: { label: `Bonus season — deploy 80% of any bonus into FIRE corpus.`, color: Colors.purple, bg: "rgba(127,119,221,0.12)" },
+        12: { label: `Annual review — update insurance cover and emergency fund limits.`, color: Colors.gold, bg: "rgba(245,166,35,0.12)" },
+      };
+
+      const fallback = staticActions[monthNum];
+
+      return (
+        <View
+          key={i}
+          style={[
+            styles.roadmapRow,
+            i === 11 ? styles.roadmapRowLast : null,
+          ]}
+        >
+          {/* Month label */}
+          <View style={styles.roadmapMonthWrap}>
+            <Text style={[
+              styles.roadmapMonth,
+              isQuarterStart ? styles.roadmapMonthQuarter : styles.roadmapMonthRegular,
+            ]}>
+              M{monthNum}
+            </Text>
+            {isQuarterStart && (
+              <Text style={styles.roadmapQuarterBadge}>
+                Q{Math.ceil(monthNum / 3)}
+              </Text>
+            )}
+          </View>
+
+          {/* Content */}
+          <View style={styles.roadmapContent}>
+            <Text style={styles.roadmapHeading}>
+              Invest {formatINR(requiredSip)}
+            </Text>
+            <Text style={styles.roadmapSubheading}>
+              {goalSplit}
+            </Text>
+
+            {/* AI action or static fallback */}
+            {aiAction ? (
+              <View style={styles.roadmapActionAi}>
+                <Text style={styles.roadmapActionAiText}>
+                  {aiAction}
+                </Text>
+              </View>
+            ) : fallback ? (
+              <View style={[styles.roadmapActionPill, { backgroundColor: fallback.bg }]}>
+                <Text style={[styles.roadmapActionText, { color: fallback.color }]}>
+                  {fallback.label}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+        </View>
+      );
+    })}
+  </View>
+</Animatable.View>
       <Animatable.View animation="fadeInUp" delay={320} duration={500} style={styles.section}>
-        <Text style={styles.sectionTitle}>Tax battle</Text>
+        <View style={styles.taxTitleRow}>
+          <Text style={styles.taxTitleIcon}>⚖️</Text>
+          <Text style={styles.sectionTitle}>Tax battle</Text>
+        </View>
         <SliderField
           helper="Move the salary slider to compare old vs new regime while keeping your current deductions fixed."
           label="Annual salary"
@@ -508,25 +777,34 @@ export default function FirePlannerTab() {
           step={50_000}
           value={taxAnnualIncome}
           valueLabel={formatINR(taxAnnualIncome, true)}
+          variant="fire-dark"
         />
 
         <View style={styles.taxWrap}>
-          <Animatable.View
-            animation="bounceIn"
-            duration={380}
+          <Animated.View
             key={betterRegime}
-            style={[styles.winnerBadge, betterRegime === "old" ? styles.winnerBadgeLeft : styles.winnerBadgeRight]}
+            style={[
+              styles.winnerBadge,
+              styles.winnerBadgeRight,
+              winnerBadgeAnimatedStyle,
+            ]}
           >
             <Text style={styles.winnerBadgeText}>{betterRegime === "old" ? "Old wins" : "New wins"}</Text>
-          </Animatable.View>
+          </Animated.View>
 
           <View style={styles.taxCardsRow}>
-            <View style={[styles.taxCard, betterRegime === "old" ? styles.taxCardWinner : null]}>
+            <View style={[
+              styles.taxCard,
+              betterRegime === "old" ? styles.taxCardWinner : styles.taxCardLoser,
+            ]}>
               <Text style={styles.taxCardTitle}>Old Regime</Text>
               <Text style={styles.taxCardValue}>{formatINR(oldTax)}</Text>
               <Text style={styles.taxCardBody}>Standard deduction + your current PF, 80C, and NPS profile.</Text>
             </View>
-            <View style={[styles.taxCard, betterRegime === "new" ? styles.taxCardWinner : null]}>
+            <View style={[
+              styles.taxCard,
+              betterRegime === "new" ? styles.taxCardWinner : styles.taxCardLoser,
+            ]}>
               <Text style={styles.taxCardTitle}>New Regime</Text>
               <Text style={styles.taxCardValue}>{formatINR(newTax)}</Text>
               <Text style={styles.taxCardBody}>Standard deduction only, with the new slab structure.</Text>
@@ -551,7 +829,13 @@ export default function FirePlannerTab() {
         <View style={styles.exportCard}>
           <View style={styles.exportHeader}>
             <Text style={styles.exportTitle}>PDF-style export</Text>
-            <Button label="Export Plan" loading={exporting} onPress={() => void handleExport()} />
+            <View style={styles.exportButtonWrap}>
+              <Button label="Export Plan" loading={exporting} onPress={() => {
+    handleExport().catch((e) => {
+      Alert.alert("Unable to export plan", e instanceof Error ? e.message : "Please try again.");
+    });
+  }} />
+            </View>
           </View>
           <Text style={styles.exportBody}>
             The export includes your detailed FIRE target, required SIP, and tax recommendation, so biometric
@@ -600,33 +884,49 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   title: {
-    color: Colors.textPrimary,
-    fontFamily: Typography.fontFamily.display,
-    fontSize: Typography.size["2xl"],
+    color: "#FFFFFF",
+    fontFamily: Typography.fontFamily.displaySemiBold,
+    fontSize: 28,
+    letterSpacing: -0.5,
   },
   subtitle: {
-    color: Colors.textSecondary,
+    color: "rgba(255,255,255,0.4)",
     fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.md,
-    lineHeight: 24,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  sharedPortfolioBadge: {
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(255,215,0,0.14)",
+    borderColor: "rgba(255,215,0,0.35)",
+    borderRadius: Radius.full,
+    borderWidth: 0.8,
+    marginTop: Spacing.xs,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 6,
+  },
+  sharedPortfolioText: {
+    color: Colors.gold,
+    fontFamily: Typography.fontFamily.numeric,
+    fontSize: Typography.size.sm,
   },
   section: {
     gap: Spacing.md,
     marginBottom: Spacing.xl,
   },
   sectionTitle: {
-    color: Colors.textPrimary,
+    color: "#FFFFFF",
     fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.lg,
+    fontSize: 16,
   },
   sliderStack: {
     gap: Spacing.md,
   },
   summaryCard: {
-    backgroundColor: Colors.navy,
-    borderRadius: Radius.lg,
+    backgroundColor: "#0D1B35",
+    borderRadius: 24,
     borderWidth: 0.5,
-    borderColor: "rgba(12,35,64,0.14)",
+    borderColor: "rgba(255,255,255,0.06)",
     gap: Spacing.md,
     marginBottom: Spacing.xl,
     padding: Spacing.xl,
@@ -641,20 +941,22 @@ const styles = StyleSheet.create({
     minWidth: 140,
   },
   summaryLabel: {
-    color: "rgba(255,255,255,0.72)",
+    color: "rgba(255,255,255,0.5)",
     fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.sm,
+    fontSize: 12,
     marginBottom: Spacing.sm,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
   },
   summaryValue: {
-    color: Colors.white,
+    color: "#D4AF37",
     fontFamily: Typography.fontFamily.numeric,
-    fontSize: Typography.size["2xl"],
+    fontSize: 32,
   },
   summaryValueText: {
-    color: Colors.white,
+    color: "#FFFFFF",
     fontFamily: Typography.fontFamily.numeric,
-    fontSize: Typography.size["2xl"],
+    fontSize: 32,
   },
   summaryRow: {
     flexDirection: "row",
@@ -662,16 +964,33 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
   },
   summaryPill: {
-    backgroundColor: "rgba(255,255,255,0.08)",
-    borderRadius: Radius.md,
+    borderRadius: Radius.full,
     borderWidth: 0.5,
-    borderColor: "rgba(255,255,255,0.08)",
+    borderColor: "transparent",
     flex: 1,
     minWidth: 140,
     padding: Spacing.md,
   },
+  targetPill: {
+    backgroundColor: "rgba(212,175,55,0.1)",
+  },
+  targetPillValue: {
+    color: "#D4AF37",
+  },
+  sipGapPillNegative: {
+    backgroundColor: "rgba(226,75,74,0.1)",
+  },
+  sipGapPillPositive: {
+    backgroundColor: "rgba(29,158,117,0.1)",
+  },
+  sipGapNegativeText: {
+    color: "#E24B4A",
+  },
+  sipGapPositiveText: {
+    color: "#1D9E75",
+  },
   summaryPillLabel: {
-    color: "rgba(255,255,255,0.68)",
+    color: "rgba(255,255,255,0.62)",
     fontFamily: Typography.fontFamily.body,
     fontSize: Typography.size.sm,
     marginBottom: Spacing.xs,
@@ -682,22 +1001,38 @@ const styles = StyleSheet.create({
     fontSize: Typography.size.md,
   },
   summaryBody: {
-    color: "rgba(255,255,255,0.84)",
+    color: "rgba(255,255,255,0.6)",
     fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.md,
-    lineHeight: 24,
+    fontSize: 13,
+    lineHeight: 20,
   },
   summaryBodyMuted: {
-    color: "rgba(255,255,255,0.66)",
+    color: "rgba(255,255,255,0.6)",
     fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.sm,
-    lineHeight: 22,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  projectionHeaderRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: Spacing.sm,
+  },
+  projectionDot: {
+    backgroundColor: "#1D9E75",
+    borderRadius: Radius.full,
+    height: 8,
+    width: 8,
+  },
+  projectionTitle: {
+    color: "#FFFFFF",
+    fontFamily: Typography.fontFamily.bodyMedium,
+    fontSize: 14,
   },
   chartCard: {
-    backgroundColor: Colors.card,
-    borderRadius: Radius.lg,
+    backgroundColor: "#1A1A1A",
+    borderRadius: 20,
     borderWidth: 0.5,
-    borderColor: Colors.border,
+    borderColor: "#2A2A2A",
     overflow: "hidden",
     paddingVertical: Spacing.lg,
   },
@@ -717,8 +1052,16 @@ const styles = StyleSheet.create({
     height: 10,
     width: 10,
   },
+  legendDashSwatch: {
+    borderColor: "#E24B4A",
+    borderRadius: 2,
+    borderStyle: "dashed",
+    borderWidth: 1,
+    height: 4,
+    width: 14,
+  },
   legendText: {
-    color: Colors.textSecondary,
+    color: "rgba(255,255,255,0.55)",
     fontFamily: Typography.fontFamily.body,
     fontSize: Typography.size.sm,
   },
@@ -726,10 +1069,15 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
   },
   allocationCard: {
-    backgroundColor: Colors.card,
-    borderRadius: Radius.lg,
+    backgroundColor: "#1A1A1A",
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 16,
+    borderLeftColor: "#D4AF37",
+    borderLeftWidth: 3,
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 16,
     borderWidth: 0.5,
-    borderColor: Colors.border,
+    borderColor: "#2A2A2A",
     gap: Spacing.md,
     padding: Spacing.lg,
   },
@@ -739,25 +1087,50 @@ const styles = StyleSheet.create({
     fontSize: Typography.size.md,
   },
   allocationHelper: {
-    color: Colors.textSecondary,
+    color: "rgba(255,255,255,0.4)",
     fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.sm,
-    lineHeight: 22,
+    fontSize: 12,
+    lineHeight: 18,
   },
   allocationGrid: {
     flexDirection: "row",
     gap: Spacing.md,
   },
   allocationChip: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.md,
-    borderWidth: 0.5,
-    borderColor: Colors.border,
+    borderRadius: Radius.full,
+    borderWidth: 0,
     flex: 1,
     padding: Spacing.md,
   },
+  allocationChipEquity: {
+    backgroundColor: "rgba(29,158,117,0.12)",
+  },
+  allocationChipDebt: {
+    backgroundColor: "rgba(212,175,55,0.12)",
+  },
+  allocationChipGold: {
+    backgroundColor: "rgba(127,119,221,0.12)",
+  },
+  allocationLabelEquity: {
+    color: "#1D9E75",
+  },
+  allocationLabelDebt: {
+    color: "#D4AF37",
+  },
+  allocationLabelGold: {
+    color: "#7F77DD",
+  },
+  allocationValueEquity: {
+    color: "#1D9E75",
+  },
+  allocationValueDebt: {
+    color: "#D4AF37",
+  },
+  allocationValueGold: {
+    color: "#7F77DD",
+  },
   allocationLabel: {
-    color: Colors.textSecondary,
+    color: "rgba(255,255,255,0.7)",
     fontFamily: Typography.fontFamily.body,
     fontSize: Typography.size.sm,
     marginBottom: Spacing.xs,
@@ -766,6 +1139,100 @@ const styles = StyleSheet.create({
     color: Colors.navy,
     fontFamily: Typography.fontFamily.displaySemiBold,
     fontSize: Typography.size.lg,
+  },
+  taxTitleRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: Spacing.sm,
+  },
+  taxTitleIcon: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    marginTop: -1,
+  },
+  roadmapWrap: {
+    backgroundColor: "#1A1A1A",
+    borderColor: "#2A2A2A",
+    borderRadius: Radius.md,
+    borderWidth: 0.5,
+    padding: Spacing.xl,
+  },
+  roadmapRow: {
+    borderBottomColor: "#242424",
+    borderBottomWidth: 0.5,
+    flexDirection: "row",
+    paddingVertical: 14,
+  },
+  roadmapRowLast: {
+    borderBottomWidth: 0,
+  },
+  roadmapMonthWrap: {
+    justifyContent: "flex-start",
+    paddingTop: 2,
+    width: 52,
+  },
+  roadmapMonth: {
+    fontFamily: Typography.fontFamily.bodyMedium,
+    fontSize: 12,
+    textTransform: "uppercase",
+  },
+  roadmapMonthQuarter: {
+    color: "#D4AF37",
+  },
+  roadmapMonthRegular: {
+    color: "rgba(255,255,255,0.25)",
+  },
+  roadmapQuarterBadge: {
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(212,175,55,0.16)",
+    borderRadius: Radius.full,
+    color: "#D4AF37",
+    fontFamily: Typography.fontFamily.bodyMedium,
+    fontSize: 9,
+    marginTop: 4,
+    overflow: "hidden",
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  roadmapContent: {
+    flex: 1,
+    gap: 4,
+    paddingLeft: 8,
+  },
+  roadmapHeading: {
+    color: Colors.textPrimary,
+    fontFamily: Typography.fontFamily.bodyMedium,
+    fontSize: 14,
+  },
+  roadmapSubheading: {
+    color: Colors.textSecondary,
+    fontFamily: Typography.fontFamily.body,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  roadmapActionAi: {
+    backgroundColor: "rgba(127,119,221,0.10)",
+    borderColor: "rgba(127,119,221,0.25)",
+    borderRadius: 10,
+    borderWidth: 0.5,
+    marginTop: 4,
+    padding: 8,
+  },
+  roadmapActionAiText: {
+    color: Colors.purple,
+    fontFamily: Typography.fontFamily.bodyMedium,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  roadmapActionPill: {
+    borderRadius: 10,
+    marginTop: 4,
+    padding: 8,
+  },
+  roadmapActionText: {
+    fontFamily: Typography.fontFamily.bodyMedium,
+    fontSize: 12,
+    lineHeight: 18,
   },
   taxWrap: {
     position: "relative",
@@ -797,55 +1264,62 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
   },
   taxCard: {
-    backgroundColor: Colors.card,
+    backgroundColor: "#1A1A1A",
     borderRadius: Radius.lg,
     borderWidth: 0.5,
-    borderColor: Colors.border,
+    borderColor: "#2A2A2A",
     flex: 1,
     gap: Spacing.sm,
     padding: Spacing.xl,
   },
   taxCardWinner: {
-    borderColor: Colors.gold,
-    backgroundColor: "#FFF8E8",
+    backgroundColor: "rgba(212,175,55,0.05)",
+    borderColor: "#D4AF37",
+    borderWidth: 1,
+    opacity: 1,
+  },
+  taxCardLoser: {
+    backgroundColor: "#1A1A1A",
+    borderColor: "#2A2A2A",
+    opacity: 0.7,
   },
   taxCardTitle: {
-    color: Colors.textPrimary,
+    color: "#FFFFFF",
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.lg,
   },
   taxCardValue: {
-    color: Colors.navy,
+    color: "#D4AF37",
     fontFamily: Typography.fontFamily.display,
     fontSize: Typography.size.xl,
   },
   taxCardBody: {
-    color: Colors.textSecondary,
+    color: "rgba(255,255,255,0.55)",
     fontFamily: Typography.fontFamily.body,
     fontSize: Typography.size.sm,
     lineHeight: 22,
   },
   switchCard: {
-    backgroundColor: "#EEF5FF",
-    borderRadius: Radius.lg,
+    backgroundColor: "#0D1B35",
+    borderRadius: 16,
     borderWidth: 0.5,
-    borderColor: "#D8E4F5",
+    borderColor: "rgba(255,255,255,0.06)",
     gap: Spacing.sm,
     padding: Spacing.xl,
   },
   switchTitle: {
-    color: Colors.navy,
+    color: "#FFFFFF",
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.lg,
   },
   switchBody: {
-    color: Colors.textSecondary,
+    color: "rgba(255,255,255,0.7)",
     fontFamily: Typography.fontFamily.body,
     fontSize: Typography.size.sm,
     lineHeight: 22,
   },
   switchNarrative: {
-    color: Colors.textPrimary,
+    color: "rgba(255,255,255,0.75)",
     fontFamily: Typography.fontFamily.body,
     fontSize: Typography.size.md,
     lineHeight: 24,
@@ -861,10 +1335,10 @@ const styles = StyleSheet.create({
     fontSize: Typography.size.sm,
   },
   exportCard: {
-    backgroundColor: Colors.card,
-    borderRadius: Radius.lg,
+    backgroundColor: "rgba(212,175,55,0.06)",
+    borderRadius: 20,
     borderWidth: 0.5,
-    borderColor: Colors.border,
+    borderColor: "rgba(212,175,55,0.2)",
     gap: Spacing.md,
     padding: Spacing.xl,
   },
@@ -874,15 +1348,19 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   exportTitle: {
-    color: Colors.textPrimary,
+    color: "#FFFFFF",
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.lg,
   },
   exportBody: {
-    color: Colors.textSecondary,
+    color: "rgba(255,255,255,0.72)",
     fontFamily: Typography.fontFamily.body,
     fontSize: Typography.size.sm,
     lineHeight: 22,
+  },
+  exportButtonWrap: {
+    borderRadius: 99,
+    overflow: "hidden",
   },
   captureContainer: {
     left: -9999,
@@ -941,3 +1419,27 @@ const styles = StyleSheet.create({
     lineHeight: 24,
   },
 });
+
+function buildSystemInstruction(_currentProfile: UserProfileData) {
+  return `You are a certified financial advisor specializing in FIRE (Financial Independence, Retire Early) planning for Indian investors.
+
+Your task is to generate a personalized 12-month action roadmap that helps this investor progress toward financial independence and retirement.
+
+Guidelines:
+1. Return ONLY a valid JSON array of exactly 12 strings — one specific action per month
+2. Each action must be a complete, actionable sentence using the investor's actual numbers
+3. Actions must be specific, measurable, and relevant to their current situation
+4. Vary actions across these areas: SIP management, tax planning, rebalancing, emergency fund, insurance, debt reduction, expense optimization, and annual reviews
+5. Quarter 1: Focus on tax planning and SIP optimization (January = tax, February = verification, March = deductions)
+6. Quarter 2: Mid-year rebalancing and performance review (April-June)
+7. Quarter 3: Rebalancing and inflation management (July-September)
+8. Quarter 4: Year-end bonus deployment and planning (October-December)
+9. Make each action specific to their risk profile, goals, and current corpus
+10. Consider their income stability, existing debt, and emergency fund status
+11. If they're behind on FIRE timeline, prioritize SIP increases and debt reduction
+12. If they're on track, focus on optimization and tax efficiency
+13. Keep each action to one sentence, no bullet points or sub-items
+
+Remember: This is their personalized roadmap, so use their actual numbers (age, SIP, corpus, retirement age, etc.) in every action where relevant.`;
+}
+

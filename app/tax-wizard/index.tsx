@@ -1,7 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withRepeat,
+  withSequence,
+  withSpring,
+  withTiming,
+} from "react-native-reanimated";
 
 import { Button } from "../../src/components/Button";
 import { Screen } from "../../src/components/Screen";
@@ -18,6 +28,68 @@ import {
 import { GeminiService } from "../../src/core/services/GeminiService";
 import { useAppStore } from "../../src/core/services/store";
 import { Colors, Radius, Spacing, Typography } from "../../src/core/theme";
+import { IS_TAX_CONFIG_CURRENT, CURRENT_TAX_YEAR } from "../../src/core/config/tax";
+
+function LoadingDots() {
+  const d1 = useSharedValue(0.3);
+  const d2 = useSharedValue(0.3);
+  const d3 = useSharedValue(0.3);
+
+  useEffect(() => {
+    const animate = (dot: any, delay: number) => {
+      dot.value = withDelay(
+        delay,
+        withRepeat(
+          withSequence(
+            withTiming(1, { duration: 260, easing: Easing.out(Easing.cubic) }),
+            withTiming(0.3, { duration: 260, easing: Easing.in(Easing.cubic) })
+          ),
+          -1,
+          false
+        )
+      );
+    };
+
+    animate(d1, 0);
+    animate(d2, 120);
+    animate(d3, 240);
+  }, [d1, d2, d3]);
+
+  const s1 = useAnimatedStyle(() => ({ opacity: d1.value }));
+  const s2 = useAnimatedStyle(() => ({ opacity: d2.value }));
+  const s3 = useAnimatedStyle(() => ({ opacity: d3.value }));
+
+  return (
+    <View style={styles.loadingDotsRow}>
+      <Animated.Text style={[styles.loadingDot, s1]}>.</Animated.Text>
+      <Animated.Text style={[styles.loadingDot, s2]}>.</Animated.Text>
+      <Animated.Text style={[styles.loadingDot, s3]}>.</Animated.Text>
+    </View>
+  );
+}
+
+function RecommendationAnimatedItem({
+  delay,
+  children,
+}: {
+  delay: number;
+  children: React.ReactNode;
+}) {
+  const y = useSharedValue(16);
+  const opacity = useSharedValue(0);
+
+  useEffect(() => {
+    y.value = withDelay(delay, withTiming(0, { duration: 280, easing: Easing.out(Easing.cubic) }));
+    opacity.value = withDelay(delay, withTiming(1, { duration: 280, easing: Easing.out(Easing.cubic) }));
+  }, [delay, opacity, y]);
+
+  const style = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+    transform: [{ translateY: y.value }],
+  }));
+
+  return <Animated.View style={style}>{children}</Animated.View>;
+}
 
 function parseNumber(value: string) {
   const digitsOnly = value.replace(/[^\d]/g, "");
@@ -41,6 +113,7 @@ function CurrencyField({
 }) {
   return (
     <TextField
+      dark
       hint={hint}
       keyboardType="number-pad"
       label={label}
@@ -55,12 +128,20 @@ function EmptyState() {
   return (
     <Screen scroll>
       <View style={styles.hero}>
-        <Text style={styles.eyebrow}>Phase 1</Text>
-        <Text style={styles.title}>Tax Wizard</Text>
-        <Text style={styles.subtitle}>
-          Finish onboarding first so the wizard can use your salary, deductions, risk profile, and existing tax data.
-        </Text>
-      </View>
+  <Text style={styles.eyebrow}>Phase 1</Text>
+  <Text style={styles.title}>Tax Wizard</Text>
+  <Text style={styles.subtitle}>
+    Upload a Form 16 screenshot or enter your salary structure manually. The wizard compares regimes, surfaces
+    deduction gaps, and ranks tax-saving moves for your profile.
+  </Text>
+  {!IS_TAX_CONFIG_CURRENT ? (
+    <View style={styles.taxWarningCard}>
+      <Text style={styles.taxWarningText}>
+        ⚠ Tax slabs are for FY {CURRENT_TAX_YEAR}. Verify with a CA for the latest year.
+      </Text>
+    </View>
+  ) : null}
+</View>
 
       <View style={styles.emptyCard}>
         <Text style={styles.emptyTitle}>Tax planning unlocks after profile setup</Text>
@@ -115,6 +196,9 @@ export default function TaxWizardScreen() {
   const [busy, setBusy] = useState<null | "scan" | "summary">(null);
   const [summary, setSummary] = useState("");
   const [summaryError, setSummaryError] = useState("");
+  const winnerScale = useSharedValue(0.95);
+  const heroY = useSharedValue(24);
+  const heroOpacity = useSharedValue(0);
 
   useEffect(() => {
     if (!profile) {
@@ -134,6 +218,25 @@ export default function TaxWizardScreen() {
     () => (currentProfile && snapshot ? getTaxWizardFallbackSummary(currentProfile, snapshot) : ""),
     [currentProfile, snapshot]
   );
+
+  useEffect(() => {
+    winnerScale.value = 0.95;
+    winnerScale.value = withSpring(1, { damping: 11, stiffness: 170 });
+  }, [snapshot?.betterRegime, winnerScale]);
+
+  useEffect(() => {
+    heroY.value = withTiming(0, { duration: 400, easing: Easing.out(Easing.cubic) });
+    heroOpacity.value = withTiming(1, { duration: 400, easing: Easing.out(Easing.cubic) });
+  }, [heroOpacity, heroY]);
+
+  const winnerCardStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: winnerScale.value }],
+  }));
+
+  const heroAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: heroOpacity.value,
+    transform: [{ translateY: heroY.value }],
+  }));
 
   useEffect(() => {
     if (!currentProfile || !snapshot) {
@@ -249,14 +352,19 @@ export default function TaxWizardScreen() {
 
   return (
     <Screen scroll>
-      <View style={styles.hero}>
+      <Animated.View style={[styles.hero, heroAnimatedStyle]}>
         <Text style={styles.eyebrow}>Phase 1</Text>
         <Text style={styles.title}>Tax Wizard</Text>
         <Text style={styles.subtitle}>
           Upload a Form 16 screenshot or enter your salary structure manually. The wizard compares regimes, surfaces
           deduction gaps, and ranks tax-saving moves for your profile.
         </Text>
-      </View>
+        {!IS_TAX_CONFIG_CURRENT ? (
+          <View style={styles.taxWarningCard}>
+            <Text style={styles.taxWarningText}>⚠ Tax slabs are for FY {CURRENT_TAX_YEAR}. Verify with a CA for the latest year.</Text>
+          </View>
+        ) : null}
+      </Animated.View>
 
       <View style={styles.section}>
         <View style={styles.uploadCard}>
@@ -267,18 +375,23 @@ export default function TaxWizardScreen() {
               deduction numbers into the form.
             </Text>
           </View>
-          <Button
-            label={busy === "scan" ? "Parsing..." : "Upload Form 16"}
-            loading={busy === "scan"}
-            onPress={() => void handleParseForm16()}
-          />
+          <View style={styles.uploadDropzone}>
+            <Text style={styles.uploadIcon}>📄</Text>
+            <Text style={styles.uploadDropHint}>Drop or select Form 16 image</Text>
+          </View>
+          <Pressable onPress={() => void handleParseForm16()} style={[styles.uploadButton, busy === "scan" ? styles.uploadButtonDisabled : null]}>
+            <Text style={styles.uploadButtonText}>{busy === "scan" ? "Parsing..." : "Upload Form 16"}</Text>
+          </Pressable>
           {scanPreview ? <Image source={{ uri: scanPreview }} style={styles.scanPreview} /> : null}
           {scanNote ? <Text style={styles.scanNote}>{scanNote}</Text> : null}
         </View>
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Salary Structure</Text>
+        <View style={styles.sectionHeadingRow}>
+          <Text style={styles.sectionHeadingIcon}>💼</Text>
+          <Text style={styles.sectionHeadingLabel}>Salary Structure</Text>
+        </View>
         <View style={styles.card}>
           <CurrencyField
             label="Annual salary"
@@ -329,7 +442,10 @@ export default function TaxWizardScreen() {
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Current Deductions</Text>
+        <View style={styles.sectionHeadingRow}>
+          <Text style={styles.sectionHeadingIcon}>🧾</Text>
+          <Text style={styles.sectionHeadingLabel}>Current Deductions</Text>
+        </View>
         <View style={styles.card}>
           <CurrencyField
             label="Annual PF contribution"
@@ -359,16 +475,28 @@ export default function TaxWizardScreen() {
           </View>
 
           <View style={styles.regimeRow}>
-            <View style={[styles.regimeCard, snapshot.betterRegime === "old" ? styles.regimeCardWinner : null]}>
+            <Animated.View
+              style={[
+                styles.regimeCard,
+                snapshot.betterRegime === "old" ? styles.regimeCardWinner : styles.regimeCardLoser,
+                snapshot.betterRegime === "old" ? winnerCardStyle : null,
+              ]}
+            >
               <Text style={styles.regimeLabel}>Old regime</Text>
               <Text style={styles.regimeValue}>{formatINR(snapshot.oldTax)}</Text>
               <Text style={styles.regimeHelper}>Taxable income: {formatINR(snapshot.oldTaxableIncome)}</Text>
-            </View>
-            <View style={[styles.regimeCard, snapshot.betterRegime === "new" ? styles.regimeCardWinner : null]}>
+            </Animated.View>
+            <Animated.View
+              style={[
+                styles.regimeCard,
+                snapshot.betterRegime === "new" ? styles.regimeCardWinner : styles.regimeCardLoser,
+                snapshot.betterRegime === "new" ? winnerCardStyle : null,
+              ]}
+            >
               <Text style={styles.regimeLabel}>New regime</Text>
               <Text style={styles.regimeValue}>{formatINR(snapshot.newTax)}</Text>
               <Text style={styles.regimeHelper}>Taxable income: {formatINR(snapshot.newTaxableIncome)}</Text>
-            </View>
+            </Animated.View>
           </View>
 
           <View style={styles.summaryStrip}>
@@ -409,7 +537,9 @@ export default function TaxWizardScreen() {
         <Text style={styles.sectionTitle}>Ranked Tax-Saving Moves</Text>
         <View style={styles.stack}>
           {snapshot.rankedRecommendations.map((item, index) => (
-            <RecommendationCard item={item} key={item.id} rank={index + 1} />
+            <RecommendationAnimatedItem delay={index * 80} key={item.id}>
+              <RecommendationCard item={item} rank={index + 1} />
+            </RecommendationAnimatedItem>
           ))}
         </View>
       </View>
@@ -418,14 +548,17 @@ export default function TaxWizardScreen() {
         <View style={styles.aiCard}>
           <View style={styles.aiHeader}>
             <Text style={styles.aiTitle}>FinMentor summary</Text>
-            <Button
-              label={busy === "summary" ? "Refreshing..." : "Refresh"}
-              loading={busy === "summary"}
-              onPress={() => void handleRefreshSummary()}
-              variant="secondary"
-            />
+            <Pressable onPress={() => void handleRefreshSummary()} style={styles.refreshGhostBtn}>
+              <Text style={styles.refreshGhostText}>{busy === "summary" ? "Refreshing..." : "Refresh"}</Text>
+            </Pressable>
           </View>
           {summaryError ? <Text style={styles.warningText}>{summaryError}</Text> : null}
+          {busy === "summary" ? (
+            <View style={styles.summaryLoadingRow}>
+              <Text style={styles.loadingText}>FinMentor is thinking</Text>
+              <LoadingDots />
+            </View>
+          ) : null}
           <Text style={styles.aiBody}>{summary || fallbackSummary}</Text>
         </View>
       </View>
@@ -439,21 +572,28 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xl,
   },
   eyebrow: {
-    color: Colors.purple,
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(212,175,55,0.12)",
+    borderColor: "rgba(212,175,55,0.3)",
+    borderRadius: Radius.full,
+    borderWidth: 0.5,
+    color: "#D4AF37",
     fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.sm,
+    fontSize: 12,
     letterSpacing: 0.8,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 4,
     textTransform: "uppercase",
   },
   title: {
-    color: Colors.textPrimary,
-    fontFamily: Typography.fontFamily.display,
-    fontSize: Typography.size["2xl"],
+    color: "#FFFFFF",
+    fontFamily: Typography.fontFamily.displaySemiBold,
+    fontSize: 28,
   },
   subtitle: {
-    color: Colors.textSecondary,
+    color: "rgba(255,255,255,0.4)",
     fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.md,
+    fontSize: 14,
     lineHeight: 24,
   },
   section: {
@@ -461,20 +601,35 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xl,
   },
   sectionTitle: {
-    color: Colors.textPrimary,
+    color: "#FFFFFF",
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.lg,
   },
+  sectionHeadingRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: Spacing.sm,
+  },
+  sectionHeadingIcon: {
+    fontSize: 14,
+  },
+  sectionHeadingLabel: {
+    color: "rgba(255,255,255,0.4)",
+    fontFamily: Typography.fontFamily.bodyMedium,
+    fontSize: 12,
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+  },
   sectionBody: {
-    color: Colors.textSecondary,
+    color: "rgba(255,255,255,0.55)",
     fontFamily: Typography.fontFamily.body,
     fontSize: Typography.size.sm,
     lineHeight: 22,
   },
   uploadCard: {
-    backgroundColor: "#EEF5FF",
-    borderColor: "#D8E4F5",
-    borderRadius: Radius.lg,
+    backgroundColor: "rgba(29,158,117,0.05)",
+    borderColor: "rgba(29,158,117,0.2)",
+    borderRadius: 20,
     borderWidth: 0.5,
     gap: Spacing.md,
     padding: Spacing.xl,
@@ -489,15 +644,49 @@ const styles = StyleSheet.create({
     width: "100%",
   },
   scanNote: {
-    color: Colors.teal,
+    color: "#1D9E75",
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.sm,
     lineHeight: 22,
   },
+  uploadDropzone: {
+    alignItems: "center",
+    borderColor: "rgba(29,158,117,0.3)",
+    borderRadius: 14,
+    borderStyle: "dashed",
+    borderWidth: 1,
+    gap: Spacing.sm,
+    justifyContent: "center",
+    padding: 20,
+  },
+  uploadIcon: {
+    fontSize: 18,
+  },
+  uploadDropHint: {
+    color: "#1D9E75",
+    fontFamily: Typography.fontFamily.body,
+    fontSize: 12,
+  },
+  uploadButton: {
+    alignItems: "center",
+    backgroundColor: "#1D9E75",
+    borderRadius: Radius.full,
+    justifyContent: "center",
+    minHeight: 52,
+    paddingHorizontal: Spacing.lg,
+  },
+  uploadButtonDisabled: {
+    opacity: 0.6,
+  },
+  uploadButtonText: {
+    color: "#FFFFFF",
+    fontFamily: Typography.fontFamily.bodyMedium,
+    fontSize: Typography.size.md,
+  },
   card: {
-    backgroundColor: Colors.card,
-    borderColor: Colors.border,
-    borderRadius: Radius.lg,
+    backgroundColor: "#1A1A1A",
+    borderColor: "#2A2A2A",
+    borderRadius: 20,
     borderWidth: 0.5,
     gap: Spacing.lg,
     padding: Spacing.xl,
@@ -506,38 +695,38 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   toggleLabel: {
-    color: Colors.textPrimary,
+    color: "rgba(255,255,255,0.5)",
     fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.sm,
+    fontSize: 13,
   },
   toggleRow: {
     flexDirection: "row",
     gap: Spacing.md,
   },
   toggleChip: {
-    backgroundColor: Colors.white,
-    borderColor: Colors.border,
+    backgroundColor: "transparent",
+    borderColor: "rgba(255,255,255,0.1)",
     borderRadius: Radius.full,
     borderWidth: 0.5,
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.sm,
   },
   toggleChipActive: {
-    backgroundColor: "#FFF4DB",
-    borderColor: Colors.gold,
+    backgroundColor: "rgba(212,175,55,0.12)",
+    borderColor: "#D4AF37",
   },
   toggleChipLabel: {
-    color: Colors.textSecondary,
+    color: "rgba(255,255,255,0.4)",
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.sm,
   },
   toggleChipLabelActive: {
-    color: Colors.navy,
+    color: "#D4AF37",
   },
   summaryCard: {
-    backgroundColor: Colors.navy,
-    borderColor: "rgba(12,35,64,0.12)",
-    borderRadius: Radius.lg,
+    backgroundColor: "#0D1B35",
+    borderColor: "rgba(255,255,255,0.06)",
+    borderRadius: 24,
     borderWidth: 0.5,
     gap: Spacing.md,
     padding: Spacing.xl,
@@ -550,7 +739,7 @@ const styles = StyleSheet.create({
   summaryTitle: {
     color: Colors.white,
     fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.lg,
+    fontSize: 18,
   },
   summaryBadge: {
     color: Colors.gold,
@@ -562,8 +751,8 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
   },
   regimeCard: {
-    backgroundColor: "rgba(255,255,255,0.08)",
-    borderColor: "rgba(255,255,255,0.08)",
+    backgroundColor: "rgba(255,255,255,0.03)",
+    borderColor: "rgba(255,255,255,0.06)",
     borderRadius: Radius.lg,
     borderWidth: 0.5,
     flex: 1,
@@ -571,24 +760,30 @@ const styles = StyleSheet.create({
     padding: Spacing.lg,
   },
   regimeCardWinner: {
-    borderColor: Colors.gold,
-    backgroundColor: "rgba(245,166,35,0.14)",
+    borderColor: "#D4AF37",
+    borderWidth: 1,
+    backgroundColor: "rgba(212,175,55,0.06)",
+    opacity: 1,
+  },
+  regimeCardLoser: {
+    opacity: 0.65,
   },
   regimeLabel: {
-    color: "rgba(255,255,255,0.72)",
+    color: "rgba(255,255,255,0.4)",
     fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.sm,
+    fontSize: 11,
+    letterSpacing: 0.8,
     textTransform: "uppercase",
   },
   regimeValue: {
     color: Colors.white,
-    fontFamily: Typography.fontFamily.display,
-    fontSize: Typography.size.xl,
+    fontFamily: Typography.fontFamily.displaySemiBold,
+    fontSize: 24,
   },
   regimeHelper: {
-    color: "rgba(255,255,255,0.72)",
+    color: "rgba(255,255,255,0.4)",
     fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.sm,
+    fontSize: 12,
     lineHeight: 20,
   },
   summaryStrip: {
@@ -597,7 +792,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   summaryStripLabel: {
-    color: "rgba(255,255,255,0.72)",
+    color: "rgba(255,255,255,0.4)",
     fontFamily: Typography.fontFamily.body,
     fontSize: Typography.size.sm,
   },
@@ -610,33 +805,33 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
   },
   opportunityCard: {
-    backgroundColor: Colors.card,
-    borderColor: Colors.border,
-    borderRadius: Radius.lg,
+    backgroundColor: "rgba(29,158,117,0.05)",
+    borderColor: "rgba(29,158,117,0.2)",
+    borderRadius: 16,
     borderWidth: 0.5,
     gap: Spacing.sm,
     padding: Spacing.xl,
   },
   opportunityTitle: {
-    color: Colors.textPrimary,
+    color: "#FFFFFF",
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.md,
   },
   opportunityValue: {
-    color: Colors.navy,
+    color: "#1D9E75",
     fontFamily: Typography.fontFamily.displaySemiBold,
-    fontSize: Typography.size.lg,
+    fontSize: 20,
   },
   opportunityBody: {
-    color: Colors.textSecondary,
+    color: "rgba(255,255,255,0.4)",
     fontFamily: Typography.fontFamily.body,
     fontSize: Typography.size.sm,
-    lineHeight: 22,
+    lineHeight: 20,
   },
   recommendationCard: {
-    backgroundColor: "#FFF9EC",
-    borderColor: "#F1DFC2",
-    borderRadius: Radius.lg,
+    backgroundColor: "rgba(212,175,55,0.04)",
+    borderColor: "rgba(212,175,55,0.15)",
+    borderRadius: 16,
     borderWidth: 0.5,
     gap: Spacing.sm,
     padding: Spacing.xl,
@@ -648,35 +843,42 @@ const styles = StyleSheet.create({
   },
   recommendationRank: {
     color: Colors.gold,
-    fontFamily: Typography.fontFamily.display,
-    fontSize: Typography.size.lg,
+    fontFamily: Typography.fontFamily.displaySemiBold,
+    fontSize: 22,
   },
   recommendationTitle: {
-    color: Colors.textPrimary,
+    color: "#FFFFFF",
     flex: 1,
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.md,
   },
   recommendationMeta: {
-    color: Colors.navy,
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.sm,
+    color: "rgba(255,255,255,0.5)",
+    fontFamily: Typography.fontFamily.body,
+    fontSize: 11,
+    borderColor: "rgba(255,255,255,0.1)",
+    borderRadius: Radius.full,
+    borderWidth: 0.5,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 4,
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(255,255,255,0.06)",
   },
   recommendationValue: {
-    color: Colors.textPrimary,
+    color: "#FFFFFF",
     fontFamily: Typography.fontFamily.displaySemiBold,
-    fontSize: Typography.size.md,
+    fontSize: 16,
   },
   recommendationBody: {
-    color: Colors.textSecondary,
+    color: "rgba(255,255,255,0.4)",
     fontFamily: Typography.fontFamily.body,
     fontSize: Typography.size.sm,
-    lineHeight: 22,
+    lineHeight: 20,
   },
   aiCard: {
-    backgroundColor: Colors.card,
-    borderColor: Colors.border,
-    borderRadius: Radius.lg,
+    backgroundColor: "rgba(127,119,221,0.06)",
+    borderColor: "rgba(127,119,221,0.2)",
+    borderRadius: 20,
     borderWidth: 0.5,
     gap: Spacing.md,
     padding: Spacing.xl,
@@ -687,12 +889,12 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   aiTitle: {
-    color: Colors.textPrimary,
+    color: "#FFFFFF",
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.lg,
   },
   aiBody: {
-    color: Colors.textPrimary,
+    color: "rgba(255,255,255,0.8)",
     fontFamily: Typography.fontFamily.body,
     fontSize: Typography.size.md,
     lineHeight: 24,
@@ -701,6 +903,39 @@ const styles = StyleSheet.create({
     color: Colors.red,
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.sm,
+  },
+  loadingText: {
+    color: "#7F77DD",
+    fontFamily: Typography.fontFamily.bodyMedium,
+    fontSize: Typography.size.sm,
+  },
+  refreshGhostBtn: {
+    alignItems: "center",
+    borderColor: "rgba(127,119,221,0.2)",
+    borderRadius: Radius.full,
+    borderWidth: 0.5,
+    justifyContent: "center",
+    minHeight: 32,
+    paddingHorizontal: Spacing.md,
+  },
+  refreshGhostText: {
+    color: "#7F77DD",
+    fontFamily: Typography.fontFamily.bodyMedium,
+    fontSize: 12,
+  },
+  summaryLoadingRow: {
+    alignItems: "center",
+    flexDirection: "row",
+  },
+  loadingDotsRow: {
+    flexDirection: "row",
+    marginLeft: 4,
+  },
+  loadingDot: {
+    color: "#7F77DD",
+    fontFamily: Typography.fontFamily.displaySemiBold,
+    fontSize: 16,
+    marginRight: 1,
   },
   emptyCard: {
     backgroundColor: Colors.card,
@@ -726,4 +961,17 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.lg,
   },
+    taxWarningCard: {
+      backgroundColor: "rgba(212,175,55,0.08)",
+      borderRadius: 12,
+      borderWidth: 0.5,
+      borderColor: "rgba(212,175,55,0.2)",
+      padding: Spacing.md,
+    },
+    taxWarningText: {
+      color: "#D4AF37",
+      fontFamily: Typography.fontFamily.bodyMedium,
+      fontSize: Typography.size.sm,
+      lineHeight: 20,
+    },
 });

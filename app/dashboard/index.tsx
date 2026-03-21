@@ -1,465 +1,340 @@
-import { useEffect, useState, useMemo } from "react";
-import { StyleSheet, Text, View, TouchableOpacity, ScrollView } from "react-native";
+import { ReactNode, useMemo, useState } from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
+import { LinearGradient } from "expo-linear-gradient";
 import * as Animatable from "react-native-animatable";
+import Animated from "react-native-reanimated";
+import { BlurView } from "expo-blur";
 
-import { Button } from "../../src/components/Button";
+import { LiquidProgressBar } from "../../src/components/LiquidProgressBar";
 import { Screen } from "../../src/components/Screen";
+import { TiltCard } from "../../src/components/TiltCard";
 import {
-  FinancialAlert,
-  UserProfileData,
   formatINR,
   getEmergencyFundMonths,
   getFireCorpusTarget,
-  getMonthlySavings,
   getOverallHealthScore,
   getSavingsRate,
 } from "../../src/core/models/UserProfile";
-import { AlertService } from "../../src/core/services/AlertService";
 import { useAppStore } from "../../src/core/services/store";
 import { Colors, Radius, Spacing, Typography } from "../../src/core/theme";
 
-function QuickActionGlass({
-  title,
-  subtitle,
-  onPress,
-  icon,
-}: {
-  title: string;
-  subtitle: string;
-  onPress: () => void;
+type FocusArea = "portfolio" | "profile" | "health" | "momentum" | "modules";
+
+type ModuleTile = {
   icon: string;
+  key: string;
+  subtitle: string;
+  title: string;
+  to: string;
+};
+
+const MODULES: ModuleTile[] = [
+  { key: "portfolio", icon: "📊", title: "Portfolio X-Ray", subtitle: "Overlap and XIRR", to: "/portfolio-xray" },
+  { key: "fire", icon: "🔥", title: "FIRE Planner", subtitle: "Live retirement simulator", to: "/dashboard/fire-planner" },
+  { key: "tax", icon: "⚖️", title: "Tax Wizard", subtitle: "Old vs new regime", to: "/tax-wizard" },
+  { key: "future", icon: "🔮", title: "Future You", subtitle: "Scenario mirror", to: "/dashboard/future-you" },
+  { key: "couple", icon: "💕", title: "Couple Planner", subtitle: "Joint strategy", to: "/couples-planner" },
+  { key: "chat", icon: "💬", title: "Money Chat", subtitle: "Ask FinMentor AI", to: "/dashboard/chat" },
+];
+
+function focusText(isFocused: boolean) {
+  return {
+    fontFamily: isFocused ? Typography.fontFamily.displaySemiBold : Typography.fontFamily.bodyMedium,
+    fontWeight: isFocused ? "700" : "500",
+  } as const;
+}
+
+function GlassCard({
+  children,
+  delay = 0,
+  onPress,
+  style,
+}: {
+  children: ReactNode;
+  delay?: number;
+  onPress?: () => void;
+  style?: object;
 }) {
   return (
-    <TouchableOpacity style={styles.glassActionCard} onPress={onPress}>
-      <View style={styles.glassActionIconBox}>
-        <Text style={styles.glassActionIcon}>{icon}</Text>
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.glassActionTitle}>{title}</Text>
-        <Text style={styles.glassActionSubtitle}>{subtitle}</Text>
-      </View>
-      <View style={styles.glassActionPill}>
-        <Text style={styles.glassActionPillText}>Open</Text>
-      </View>
-    </TouchableOpacity>
+    <Animatable.View animation="fadeInUp" delay={delay} duration={520}>
+      <Pressable onPress={onPress} style={[styles.glassCard, style]}>
+        <BlurView intensity={15} tint="dark" style={StyleSheet.absoluteFillObject} />
+        <LinearGradient
+          colors={["rgba(168,85,247,0.15)", "rgba(255,215,0,0.12)", "rgba(255,255,255,0.04)"]}
+          end={{ x: 1, y: 1 }}
+          start={{ x: 0, y: 0 }}
+          style={StyleSheet.absoluteFillObject}
+        />
+        <View style={styles.meshOrbA} />
+        <View style={styles.meshOrbB} />
+        {children}
+      </Pressable>
+    </Animatable.View>
   );
 }
 
 export default function DashboardHome() {
   const profile = useAppStore((state) => state.currentProfile);
-  const demoMode = useAppStore((state) => state.demoMode);
   const portfolioXRay = useAppStore((state) => state.portfolioXRay);
-  const [alerts, setAlerts] = useState<FinancialAlert[]>([]);
-
-  const monthlySavings = profile ? getMonthlySavings(profile) : 0;
-  const emergencyMonths = profile ? getEmergencyFundMonths(profile) : 0;
-  const fireTarget = profile ? getFireCorpusTarget(profile) : 0;
-  const healthScore = profile ? getOverallHealthScore(profile) : 0;
-  const savingsRate = profile ? getSavingsRate(profile) : 0;
-
-  useEffect(() => {
-    if (!profile) {
-      setAlerts([]);
-      return;
-    }
-    let active = true;
-    void (async () => {
-      const nextAlerts = await AlertService.getActiveAlerts(profile);
-      if (active) setAlerts(nextAlerts);
-    })();
-    return () => { active = false; };
-  }, [profile]);
+  const [focusArea, setFocusArea] = useState<FocusArea>("portfolio");
 
   const totalPortfolioValue = portfolioXRay?.totalValue || 0;
   const xirr = portfolioXRay?.overallXIRR ?? null;
-  // Get time of day for greeting
-  const hours = new Date().getHours();
-  let greeting = "Good Evening";
-  if (hours < 12) greeting = "Good Morning";
-  else if (hours < 17) greeting = "Good Afternoon";
+  const healthScore = profile ? getOverallHealthScore(profile) : 0;
+  const savingsRate = profile ? getSavingsRate(profile) : 0;
+  const emergencyMonths = profile ? getEmergencyFundMonths(profile) : 0;
+  const fireTarget = profile ? getFireCorpusTarget(profile) : 0;
+  const corpusProgress = fireTarget > 0 ? Math.min(totalPortfolioValue / fireTarget, 1) : 0;
+
+  const greeting = useMemo(() => {
+    const h = new Date().getHours();
+    if (h < 12) return "Good Morning";
+    if (h < 17) return "Good Afternoon";
+    return "Good Evening";
+  }, []);
 
   return (
     <Screen scroll>
-      {/* ── Header: Hero Section ── */}
-      <Animatable.View animation="fadeIn" duration={600} style={styles.heroContainer}>
-        <Text style={styles.greetingText}>{greeting}, {profile?.name?.split(' ')[0] || "Investor"}</Text>
-        <Text style={styles.heroSubText}>Total Portfolio Value</Text>
-        <View style={styles.heroValueRow}>
-          <Text style={styles.heroValueText}>{formatINR(totalPortfolioValue)}</Text>
-          <View style={styles.badgeGreen}>
-            <Text style={styles.badgeGreenText}>+1.2% (1D)</Text>
-          </View>
+      {__DEV__ ? (
+        <View style={styles.devBuildBadge}>
+          <Text style={styles.devBuildBadgeText}>DEV BUILD: UI REFRESH ACTIVE</Text>
         </View>
-        <View style={styles.xirrRow}>
-          <Text style={styles.xirrLabel}>Overall XIRR</Text>
-          <Text style={styles.xirrValue}>{xirr !== null ? `${xirr.toFixed(1)}%` : "N/A"}</Text>
+      ) : null}
+
+      <GlassCard delay={0} onPress={() => setFocusArea("portfolio")} style={styles.heroCard}>
+        <Text style={[styles.heroGreeting, focusText(focusArea === "portfolio")]}>
+          {greeting}, {profile?.name?.split(" ")[0] || "Investor"}
+        </Text>
+        <Text style={styles.heroLabel}>Total Portfolio Value</Text>
+
+        <Animated.View sharedTransitionTag="portfolio-shared-value" style={styles.portfolioSharedWrap}>
+          <Text style={[styles.heroValue, focusText(focusArea === "portfolio")]}>{formatINR(totalPortfolioValue)}</Text>
+        </Animated.View>
+
+        <View style={styles.heroMetaRow}>
+          <Text style={styles.heroMetaText}>Overall XIRR: {xirr !== null ? `${xirr.toFixed(1)}%` : "N/A"}</Text>
+          <Text style={styles.heroMetaText}>Savings Rate: {savingsRate.toFixed(0)}%</Text>
         </View>
-      </Animatable.View>
+      </GlassCard>
 
-      {/* ── The "Lollipop" Progress Bars (Asset Allocation) ── */}
-      {profile && (
-        <Animatable.View animation="fadeInUp" delay={100} duration={500} style={styles.lollipopSection}>
-          <Text style={styles.sectionTitle}>Asset Class Breakdown</Text>
-          <View style={styles.lollipopContainer}>
-            {Object.entries(portfolioXRay?.categoryAllocation || {}).map(([category, percentage]) => (
-              <View key={category} style={styles.lollipopCol}>
-                <View style={styles.lollipopTrack}>
-                  <View style={[styles.lollipopFill, { height: `${percentage}%`, backgroundColor: Colors.teal }]} />
-                </View>
-                <Text style={styles.lollipopLabel}>{category}</Text>
-                <Text style={styles.lollipopPct}>{percentage}%</Text>
-              </View>
-            ))}
-          </View>
-          {demoMode && <Text style={styles.demoBadge}>DEMO DATA</Text>}
-        </Animatable.View>
-      )}
+      <View style={styles.bentoRow}>
+        <TiltCard onPress={() => router.push("/profile-edit") as never} style={styles.bentoCell}>
+          <GlassCard delay={70} onPress={() => setFocusArea("profile")} style={styles.tiltCard}>
+            <Text style={[styles.bentoHeading, focusText(focusArea === "profile")]}>Profile Snapshot</Text>
+            <Text style={styles.bentoBody}>Emergency runway: {emergencyMonths.toFixed(1)} months</Text>
+            <Text style={styles.bentoBody}>Risk style: {profile?.riskProfile || "Balanced"}</Text>
+          </GlassCard>
+        </TiltCard>
 
-      {/* ── Report Card Section (Financial Health) ── */}
-      {profile && (
-        <Animatable.View animation="fadeInUp" delay={200} duration={500} style={styles.healthSection}>
-          <View style={styles.glassCardNested}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.healthTitle}>Financial Health</Text>
-              <Text style={styles.healthSub}>Based on 6 dimensions of ET FinMentor wellness.</Text>
-              <TouchableOpacity style={styles.investBtn} onPress={() => router.push("/health-score")}>
-                 <Text style={styles.investBtnText}>Improve Score</Text>
-              </TouchableOpacity>
-            </View>
-            <View style={styles.healthMeterBox}>
-               {/* Faked Segmented Circular Gauge via border trick */}
-               <View style={styles.meterOuter}>
-                  <View style={styles.meterInner}>
-                     <Text style={styles.meterScore}>{healthScore.toFixed(0)}</Text>
-                     <Text style={styles.meterMax}>/100</Text>
-                  </View>
-               </View>
-            </View>
-          </View>
-        </Animatable.View>
-      )}
+        <TiltCard onPress={() => router.push("/health-score") as never} style={styles.bentoCell}>
+          <GlassCard delay={120} onPress={() => setFocusArea("health")} style={styles.tiltCard}>
+            <Text style={[styles.bentoHeading, focusText(focusArea === "health")]}>Financial Health</Text>
+            <Text style={styles.healthDial}>{healthScore.toFixed(0)}/100</Text>
+            <Text style={styles.bentoBody}>Tap to improve weak dimensions</Text>
+          </GlassCard>
+        </TiltCard>
+      </View>
 
-      {/* ── Insights Feed (Social Media Style Cards) ── */}
-      {profile && (
-        <Animatable.View animation="fadeInUp" delay={300} duration={500} style={styles.insightsSection}>
-          <Text style={styles.sectionTitle}>ET FinMentor Insights</Text>
-          <View style={styles.insightCard}>
-            <Text style={styles.insightTitle}>Personalized insights coming soon!</Text>
-            <Text style={styles.insightAction}>Stay tuned for updates.</Text>
-          </View>
-        </Animatable.View>
-      )}
+      <GlassCard delay={180} onPress={() => setFocusArea("momentum")} style={styles.momentumCard}>
+        <Text style={[styles.bentoHeading, focusText(focusArea === "momentum")]}>Momentum To FIRE</Text>
+        <LiquidProgressBar label="Corpus fill" progress={corpusProgress} />
+        <Text style={styles.bentoBody}>
+          {fireTarget > 0
+            ? `${formatINR(totalPortfolioValue, true)} of ${formatINR(fireTarget, true)} target corpus`
+            : "Complete profile details to unlock FIRE target projection."}
+        </Text>
+      </GlassCard>
 
-      {/* ── App Navigation / Quick Actions (Glassmorphic) ── */}
-      <Animatable.View animation="fadeInUp" delay={400} duration={500} style={styles.navSection}>
-        <Text style={styles.sectionTitle}>App Modules</Text>
-        <View style={styles.navGrid}>
-          <QuickActionGlass icon="📊" title="Portfolio X-Ray" subtitle="Upload statement for overlap & XIRR." onPress={() => router.push("/portfolio-xray" as never)} />
-          <QuickActionGlass icon="🔥" title="FIRE Planner" subtitle="Model your path to early retirement." onPress={() => router.push("/dashboard/fire-planner")} />
-          <QuickActionGlass icon="⚖️" title="Tax Wizard" subtitle="Upload Form 16 & optimize regimes." onPress={() => router.push("/tax-wizard" as never)} />
-          <QuickActionGlass icon="💕" title="Couple's Planner" subtitle="Joint wealth and tax optimization." onPress={() => router.push("/couples-planner" as never)} />
-          <QuickActionGlass icon="🔮" title="Future You" subtitle="Visualize corpus growth trajectories." onPress={() => router.push("/dashboard/future-you")} />
-          <QuickActionGlass icon="🎉" title="Life Events" subtitle="Navigate marriage, baby, or home buys." onPress={() => router.push("/life-events")} />
-          <QuickActionGlass icon="💬" title="Money Chat" subtitle="Ask AI advisor profile-aware queries." onPress={() => router.push("/dashboard/chat")} />
-          <QuickActionGlass icon="🚀" title="Onboarding" subtitle="Complete your initial financial profile setup." onPress={() => router.push("/onboarding")} />
+      <Animatable.View animation="fadeInUp" delay={240} duration={520}>
+        <Text style={[styles.sectionTitle, focusText(focusArea === "modules")]}>Bento Modules</Text>
+        <View style={styles.moduleGrid}>
+          {MODULES.map((module) => (
+            <Pressable
+              key={module.key}
+              onPress={() => {
+                setFocusArea("modules");
+                router.push(module.to as never);
+              }}
+              style={styles.moduleTile}
+            >
+              <LinearGradient
+                colors={["rgba(255,255,255,0.08)", "rgba(168,85,247,0.11)", "rgba(255,215,0,0.07)"]}
+                end={{ x: 1, y: 1 }}
+                start={{ x: 0, y: 0 }}
+                style={StyleSheet.absoluteFillObject}
+              />
+              <Text style={styles.moduleIcon}>{module.icon}</Text>
+              <Text style={styles.moduleTitle}>{module.title}</Text>
+              <Text style={styles.moduleSubtitle}>{module.subtitle}</Text>
+            </Pressable>
+          ))}
         </View>
       </Animatable.View>
 
-      <View style={{height: 100}} />
+      <View style={styles.bottomPad} />
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  // Hero
-  heroContainer: {
-    padding: Spacing.xl,
-    paddingTop: Spacing["3xl"],
-    paddingBottom: Spacing["2xl"],
-    marginHorizontal: Spacing.lg,
-    borderRadius: Radius.lg,
-    backgroundColor: "rgba(12, 12, 12, 0.4)", // Darker embedded look
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.05)",
-    marginBottom: Spacing.xl,
-    marginTop: Spacing.lg,
-  },
-  greetingText: {
-    color: Colors.textSecondary,
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.md,
-    marginBottom: Spacing.xl,
-  },
-  heroSubText: {
-    color: Colors.textSecondary,
-    fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.sm,
-    letterSpacing: 0.5,
-    marginBottom: 4,
-  },
-  heroValueRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: Spacing.md,
-    gap: Spacing.md,
-  },
-  heroValueText: {
-    color: Colors.white,
-    fontFamily: Typography.fontFamily.display,
-    fontSize: Typography.size["3xl"],
-    letterSpacing: -1,
-  },
-  badgeGreen: {
-    backgroundColor: "rgba(0, 184, 82, 0.15)",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: "rgba(0, 184, 82, 0.3)",
-  },
-  badgeGreenText: {
-    color: Colors.teal,
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.xs,
-    fontWeight: "600",
-  },
-  xirrRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.sm,
-  },
-  xirrLabel: {
-    color: Colors.textMuted,
-    fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.xs,
-  },
-  xirrValue: {
-    color: Colors.white,
-    fontFamily: Typography.fontFamily.numeric,
-    fontSize: Typography.size.sm,
-  },
-
-  sectionTitle: {
-    color: Colors.white,
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.lg,
-    marginBottom: Spacing.lg,
-    paddingHorizontal: Spacing.lg,
-  },
-
-  // Lollipop Progress
-  lollipopSection: {
-    marginBottom: Spacing["2xl"],
-  },
-  lollipopContainer: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingHorizontal: Spacing.xl,
-    height: 120,
-  },
-  lollipopCol: {
-    alignItems: "center",
-    justifyContent: "flex-end",
-    width: 60,
-  },
-  lollipopTrack: {
-    width: 12,
-    height: 80,
-    backgroundColor: "rgba(255, 255, 255, 0.05)",
+  devBuildBadge: {
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(29,158,117,0.16)",
+    borderColor: "rgba(29,158,117,0.42)",
     borderRadius: Radius.full,
-    justifyContent: "flex-end",
+    borderWidth: 0.8,
+    marginBottom: Spacing.sm,
+    marginTop: Spacing.xs,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 6,
+  },
+  devBuildBadgeText: {
+    color: "#63D7AE",
+    fontFamily: Typography.fontFamily.bodyMedium,
+    fontSize: 11,
+    letterSpacing: 0.6,
+  },
+  heroCard: {
+    marginBottom: Spacing.lg,
+    marginTop: Spacing.md,
+    minHeight: 180,
+  },
+  heroGreeting: {
+    color: Colors.textSecondary,
+    fontSize: Typography.size.md,
     marginBottom: Spacing.sm,
   },
-  lollipopFill: {
-    width: 12,
-    borderRadius: Radius.full,
-  },
-  lollipopLabel: {
-    color: Colors.textSecondary,
+  heroLabel: {
+    color: "rgba(255,255,255,0.7)",
     fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.xs,
-    marginBottom: 2,
-  },
-  lollipopPct: {
-    color: Colors.white,
-    fontFamily: Typography.fontFamily.numeric,
     fontSize: Typography.size.sm,
+    marginBottom: Spacing.xs,
   },
-
-  // Health Section
-  healthSection: {
-    paddingHorizontal: Spacing.lg,
-    marginBottom: Spacing["2xl"],
+  portfolioSharedWrap: {
+    alignSelf: "flex-start",
+    marginBottom: Spacing.sm,
   },
-  glassCardNested: {
+  heroValue: {
+    color: Colors.textPrimary,
+    fontSize: Typography.size["3xl"],
+    letterSpacing: -0.6,
+  },
+  heroMetaRow: {
     flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(30,30,30,0.4)",
-    borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
-    padding: Spacing.xl,
+    gap: Spacing.md,
   },
-  healthTitle: {
-    color: Colors.white,
-    fontFamily: Typography.fontFamily.displaySemiBold,
-    fontSize: Typography.size.xl,
-    marginBottom: 4,
+  heroMetaText: {
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderColor: "rgba(255,255,255,0.15)",
+    borderRadius: Radius.full,
+    borderWidth: 0.8,
+    color: Colors.textSecondary,
+    fontFamily: Typography.fontFamily.bodyMedium,
+    fontSize: Typography.size.xs,
+    overflow: "hidden",
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 6,
   },
-  healthSub: {
+  bentoRow: {
+    flexDirection: "row",
+    gap: Spacing.md,
+    marginBottom: Spacing.md,
+  },
+  bentoCell: {
+    flex: 1,
+  },
+  tiltCard: {
+    minHeight: 140,
+  },
+  momentumCard: {
+    marginBottom: Spacing.lg,
+  },
+  bentoHeading: {
+    color: Colors.textPrimary,
+    fontSize: Typography.size.md,
+    marginBottom: Spacing.sm,
+  },
+  bentoBody: {
     color: Colors.textSecondary,
     fontFamily: Typography.fontFamily.body,
     fontSize: Typography.size.sm,
     lineHeight: 20,
-    marginBottom: Spacing.lg,
-    paddingRight: Spacing.md,
   },
-  investBtn: {
-    backgroundColor: "rgba(255,255,255,0.1)",
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.sm,
-    borderRadius: Radius.full,
-    alignSelf: "flex-start",
-  },
-  investBtnText: {
-    color: Colors.white,
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.sm,
-  },
-  healthMeterBox: {
-    width: 80,
-    height: 80,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  meterOuter: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    borderWidth: 6,
-    borderColor: "rgba(0,184,82,0.2)",
-    borderTopColor: Colors.teal,
-    borderRightColor: Colors.teal,
-    borderBottomColor: Colors.teal,
-    alignItems: "center",
-    justifyContent: "center",
-    transform: [{ rotate: "45deg" }],
-  },
-  meterInner: {
-    transform: [{ rotate: "-45deg" }],
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  meterScore: {
-    color: Colors.white,
+  healthDial: {
+    color: Colors.gold,
     fontFamily: Typography.fontFamily.numeric,
-    fontSize: Typography.size.xl,
-    lineHeight: 28,
+    fontSize: Typography.size["2xl"],
+    marginBottom: Spacing.xs,
   },
-  meterMax: {
-    color: Colors.textSecondary,
-    fontFamily: Typography.fontFamily.body,
-    fontSize: 10,
+  sectionTitle: {
+    color: Colors.textPrimary,
+    fontSize: Typography.size.lg,
+    marginBottom: Spacing.md,
   },
-
-  // Insights
-  insightsSection: {
-    marginBottom: Spacing["2xl"],
-  },
-  insightsScroll: {
-    paddingHorizontal: Spacing.lg,
+  moduleGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
     gap: Spacing.md,
   },
-  insightCard: {
-    width: 260,
-    backgroundColor: "rgba(20,20,20,0.8)",
+  moduleTile: {
+    backgroundColor: "rgba(17,18,26,0.56)",
+    borderColor: "rgba(255,255,255,0.15)",
     borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
-    padding: Spacing.lg,
-    justifyContent: "space-between",
+    borderWidth: 0.8,
+    minHeight: 128,
+    overflow: "hidden",
+    padding: Spacing.md,
+    width: "47.8%",
   },
-  insightTag: {
-    color: "#00E5FF", // Electric blue
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.xs,
-    letterSpacing: 1,
+  moduleIcon: {
+    fontSize: 20,
     marginBottom: Spacing.sm,
   },
-  insightTitle: {
-    color: Colors.white,
-    fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.md,
-    lineHeight: 22,
-    marginBottom: Spacing.xl,
-  },
-  insightAction: {
-    color: Colors.teal,
+  moduleTitle: {
+    color: Colors.textPrimary,
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.sm,
+    marginBottom: 4,
   },
-
-  // Nav actions
-  navSection: {
-    paddingHorizontal: Spacing.lg,
-  },
-  navGrid: {
-    gap: Spacing.md,
-  },
-  glassActionCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(20, 20, 20, 0.6)",
-    borderRadius: Radius.md,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.04)",
-    padding: Spacing.lg,
-    gap: Spacing.md,
-  },
-  glassActionIconBox: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: "rgba(255,255,255,0.05)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  glassActionIcon: {
-    fontSize: 20,
-  },
-  glassActionTitle: {
-    color: Colors.white,
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.md,
-    marginBottom: 2,
-  },
-  glassActionSubtitle: {
+  moduleSubtitle: {
     color: Colors.textSecondary,
     fontFamily: Typography.fontFamily.body,
     fontSize: Typography.size.xs,
+    lineHeight: 16,
   },
-  glassActionPill: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: Radius.full,
-    backgroundColor: "rgba(255,255,255,0.08)",
+  glassCard: {
+    backgroundColor: "rgba(14,16,24,0.62)",
+    borderColor: "rgba(255,255,255,0.17)",
+    borderRadius: Radius.lg,
+    borderWidth: 0.8,
+    overflow: "hidden",
+    padding: Spacing.lg,
+    position: "relative",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
   },
-  glassActionPillText: {
-    color: Colors.textPrimary,
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: 12,
+  meshOrbA: {
+    backgroundColor: "rgba(168,85,247,0.17)",
+    borderRadius: 90,
+    height: 110,
+    position: "absolute",
+    right: -35,
+    top: -25,
+    width: 110,
   },
-  demoBadge: {
-    backgroundColor: Colors.gold,
-    color: Colors.black,
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.xs,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 2,
-    borderRadius: Radius.sm,
-    overflow: 'hidden',
-    alignSelf: 'center',
-    marginTop: Spacing.md,
+  meshOrbB: {
+    backgroundColor: "rgba(255,215,0,0.15)",
+    borderRadius: 80,
+    bottom: -34,
+    height: 88,
+    left: -34,
+    position: "absolute",
+    width: 88,
+  },
+  bottomPad: {
+    height: 90,
   },
 });

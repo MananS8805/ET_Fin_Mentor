@@ -1,7 +1,8 @@
-import { forwardRef } from "react";
+import { forwardRef, useEffect, useState } from "react";
 import { StyleSheet, Text, TextInput, TextInputProps, View } from "react-native";
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 
-import { Colors, Radius, Spacing, Typography } from "../core/theme";
+import { Colors, Spacing, Typography } from "../core/theme";
 
 type TextFieldProps = TextInputProps & {
   label: string;
@@ -15,23 +16,57 @@ export const TextField = forwardRef<TextInput, TextFieldProps>(function TextFiel
   { label, hint, prefix, dark = false, error, style, ...props },
   ref
 ) {
-  const backgroundColor = Colors.card;
-  const borderColor = error ? Colors.red : Colors.border;
-  const textColor = Colors.textPrimary;
-  const hintColor = Colors.textSecondary;
+  const [focused, setFocused] = useState(false);
+  const borderProgress = useSharedValue(0);
+
+  useEffect(() => {
+    borderProgress.value = withTiming(focused ? 1 : 0, { duration: 200 });
+  }, [borderProgress, focused]);
+
+  const inputRowAnimatedStyle = useAnimatedStyle(() => ({
+    borderColor:
+      error
+        ? Colors.red
+        : borderProgress.value > 0.5
+          ? Colors.gold
+          : dark
+            ? "rgba(255,255,255,0.12)"
+            : Colors.border,
+  }));
+
+  const backgroundColor = dark ? "#0D0D0D" : Colors.card;
+  const textColor = dark ? Colors.white : Colors.textPrimary;
+  const hintColor = dark ? "rgba(255,255,255,0.5)" : Colors.textSecondary;
 
   return (
     <View style={styles.wrapper}>
-      <Text style={[styles.label, { color: Colors.textPrimary }]}>{label}</Text>
-      <View style={[styles.inputRow, { backgroundColor, borderColor, borderWidth: error ? 1.5 : 1 }]}>
+      <Text
+        style={[
+          styles.label,
+          dark ? styles.darkLabel : null,
+          { color: dark ? "rgba(255,255,255,0.5)" : Colors.textPrimary },
+        ]}
+      >
+        {label}
+      </Text>
+      <Animated.View
+        style={[
+          styles.inputRow,
+          dark ? styles.darkInputRow : null,
+          inputRowAnimatedStyle,
+          { backgroundColor, borderWidth: error ? 1 : 0.5 },
+        ]}
+      >
         {prefix ? <Text style={[styles.prefix, { color: hintColor }]}>{prefix}</Text> : null}
         <TextInput
           ref={ref}
-          placeholderTextColor={Colors.textMuted}
+          onBlur={() => setFocused(false)}
+          onFocus={() => setFocused(true)}
+          placeholderTextColor={dark ? "rgba(255,255,255,0.2)" : Colors.textMuted}
           style={[styles.input, { color: textColor }, style]}
           {...props}
         />
-      </View>
+      </Animated.View>
       {error ? <Text style={[styles.hint, styles.errorHint]}>{error}</Text> : null}
       {hint ? <Text style={[styles.hint, { color: hintColor }]}>{hint}</Text> : null}
     </View>
@@ -46,14 +81,21 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.sm,
   },
+  darkLabel: {
+    fontSize: 13,
+  },
   inputRow: {
-    minHeight: 52,
-    borderRadius: Radius.md,
+    minHeight: 56,
+    borderRadius: 14,
     borderWidth: 0.5,
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: Spacing.lg,
     gap: Spacing.sm,
+  },
+  darkInputRow: {
+    borderColor: "#2A2A2A",
+    minHeight: 52,
   },
   prefix: {
     fontFamily: Typography.fontFamily.bodyMedium,

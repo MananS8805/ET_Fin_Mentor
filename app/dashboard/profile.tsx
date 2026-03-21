@@ -41,7 +41,7 @@ export default function ProfileTab() {
       setSigningOut(true);
       await AuthService.signOut();
       reset();
-      router.replace("/auth");
+      router.push("/auth");
     } catch (error) {
       Alert.alert("Unable to sign out", error instanceof Error ? error.message : "Please try again.");
     } finally {
@@ -171,9 +171,16 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     padding: Spacing.xl,
     gap: Spacing.md,
+    elevation: 1,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
   },
   personaCardActive: {
     borderColor: Colors.gold,
+    elevation: 3,
+    shadowOpacity: 0.25,
   },
   cardTitle: {
     color: Colors.textPrimary,
@@ -197,7 +204,7 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   summaryBody: {
-    color: "rgba(255,255,255,0.76)",
+    color: Colors.textPrimary,
     fontFamily: Typography.fontFamily.body,
     fontSize: Typography.size.sm,
     lineHeight: 22,

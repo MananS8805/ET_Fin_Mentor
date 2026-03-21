@@ -1,7 +1,6 @@
-// src/core/config/tax.ts
-
 export const CURRENT_TAX_YEAR = "2025-26";
-export const IS_TAX_CONFIG_CURRENT = new Date().getFullYear() < 2026;
+export const TAX_CONFIG_VALID_UNTIL_YEAR = 2027;
+export const IS_TAX_CONFIG_CURRENT = new Date().getFullYear() < TAX_CONFIG_VALID_UNTIL_YEAR;
 
 export const OLD_REGIME_SLABS_2025 = [
   { upto: 300_000, rate: 0 },
@@ -22,8 +21,6 @@ export const NEW_REGIME_SLABS_2025 = [
 ] as const;
 
 export function getTaxSlabWarning(): string | null {
-  if (IS_TAX_CONFIG_CURRENT) {
-    return null;
-  }
-  return `Warning: Tax slabs are for FY ${CURRENT_TAX_YEAR} and may be outdated. Please consult a tax advisor for the current year.`;
+  if (IS_TAX_CONFIG_CURRENT) return null;
+  return `Tax slabs are for FY ${CURRENT_TAX_YEAR}. Please verify with a tax advisor for the current year.`;
 }

@@ -411,7 +411,7 @@ function buildRecommendationReason(profile: UserProfileData, scheme: SipScheme):
   return scheme.compareNote;
 }
 
-function buildRecommendationCaution(profile: UserProfileData, scheme: SipScheme): string {
+function buildRecommendationCaution(_profile: UserProfileData, scheme: SipScheme): string {
   if (scheme.lockInYears > 0) {
     return `This comes with a ${scheme.lockInYears}-year lock-in, so use it only for long-term money.`;
   }

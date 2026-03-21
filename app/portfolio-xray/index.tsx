@@ -1,12 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from "react-native";
+import { ActivityIndicator, Alert, Image, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
 import * as Animatable from "react-native-animatable";
 import * as Sharing from "expo-sharing";
 import ViewShot from "react-native-view-shot";
 import { VictoryPie } from "victory-native";
-
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withTiming,
+} from "react-native-reanimated";
+import { ProfileService } from "../../src/core/services/ProfileService";
 import { Button } from "../../src/components/Button";
 import { Screen } from "../../src/components/Screen";
 import { AuthService } from "../../src/core/services/AuthService";
@@ -26,7 +33,6 @@ import {
   PortfolioMetrics,
   Fund,
   Transaction,
-  HoldingWithOverlap,
 } from "../../src/core/services/MutualFundService";
 import { useAppStore } from "../../src/core/services/store";
 import { Colors, Radius, Spacing, Typography } from "../../src/core/theme";
@@ -35,7 +41,6 @@ import { FundPerformanceTable } from "./components/FundPerformanceTable";
 import { SmartRecommendationPanel } from "./components/SmartRecommendationPanel";
 import { SchemeInputForm } from "./components/SchemeInputForm";
 import { HoldingEditModal } from "./components/HoldingEditModal";
-import ManualFundEntry from "./components/ManualFundEntry";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -72,6 +77,17 @@ const PIE_COLORS = [
   "#1D9E75",
   "#888",
 ];
+
+const CATEGORY_THEME: Record<MFHolding["category"], string> = {
+  large_cap: "#378ADD",
+  mid_cap: "#1D9E75",
+  small_cap: "#E24B4A",
+  elss: "#7F77DD",
+  debt: "#2E5B9A",
+  hybrid: "#D4AF37",
+  liquid: "#1D9E75",
+  other: "#888888",
+};
 
 // Build a PortfolioXRay from an array of MFHolding — pure, offline
 function buildXRay(holdings: MFHolding[]): PortfolioXRay {
@@ -204,7 +220,6 @@ function EmptyState() {
   return (
     <Screen scroll>
       <View style={styles.hero}>
-        {/* Removed Day 10 */}
         <Text style={styles.title}>Portfolio X-Ray</Text>
         <Text style={styles.subtitle}>
           Finish onboarding first so the X-Ray can align your risk profile and goals with the rebalancing plan.
@@ -221,14 +236,45 @@ function EmptyState() {
   );
 }
 
-function HoldingCard({ holding, onEdit }: { holding: MFHolding; onEdit?: () => void }) {
+function HoldingCard({
+  holding,
+  onEdit,
+  index,
+}: {
+  holding: MFHolding;
+  onEdit?: () => void;
+  index: number;
+}) {
   const color = xirrColor(holding.xirr);
+  const categoryColor = CATEGORY_THEME[holding.category] ?? "#888888";
+  const y = useSharedValue(16);
+  const opacity = useSharedValue(0);
+
+  useEffect(() => {
+    y.value = withDelay(index * 40, withTiming(0, { duration: 320, easing: Easing.out(Easing.cubic) }));
+    opacity.value = withDelay(index * 40, withTiming(1, { duration: 320, easing: Easing.out(Easing.cubic) }));
+  }, [index, opacity, y]);
+
+  const itemAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+    transform: [{ translateY: y.value }],
+  }));
+
   return (
-    <TouchableOpacity style={styles.holdingCard} onPress={onEdit} disabled={!onEdit}>
+    <Animated.View style={itemAnimatedStyle}>
+      <TouchableOpacity style={styles.holdingCard} onPress={onEdit} disabled={!onEdit}>
       <View style={styles.holdingHeader}>
         <View style={{ flex: 1 }}>
           <Text style={styles.holdingName} numberOfLines={2}>{holding.name}</Text>
-          <View style={[styles.categoryTag, { borderColor: Colors.border }]}>
+          <View
+            style={[
+              styles.categoryTag,
+              {
+                backgroundColor: `${categoryColor}1A`,
+                borderColor: `${categoryColor}55`,
+              },
+            ]}
+          >
             <Text style={styles.categoryTagText}>{CATEGORY_LABELS[holding.category]}</Text>
           </View>
         </View>
@@ -245,22 +291,24 @@ function HoldingCard({ holding, onEdit }: { holding: MFHolding; onEdit?: () => v
         </View>
         <View style={{ alignItems: "flex-end" }}>
           <Text style={styles.metaLabel}>Returns</Text>
-          <Text style={[styles.metaValue, { color }]}>{xirrLabel(holding.xirr)}</Text>
+          <Text style={[styles.metaValue, styles.metaXirrValue, { color }]}>{xirrLabel(holding.xirr)}</Text>
         </View>
       </View>
-    </TouchableOpacity>
+      </TouchableOpacity>
+    </Animated.View>
   );
 }
 
 function OverlapCard({ pair }: { pair: OverlapPair }) {
-  const borderColor = pair.overlapLevel === "high" ? Colors.red : Colors.gold;
-  const labelColor = pair.overlapLevel === "high" ? Colors.red : Colors.gold;
-  const bg = pair.overlapLevel === "high" ? "#FFF1F1" : "#FFFBF0";
+  const isHigh = pair.overlapLevel === "high";
+  const borderColor = isHigh ? "rgba(226,75,74,0.2)" : "rgba(212,175,55,0.2)";
+  const labelColor = isHigh ? "#E24B4A" : "#D4AF37";
+  const bg = isHigh ? "rgba(226,75,74,0.06)" : "rgba(212,175,55,0.06)";
   return (
     <View style={[styles.overlapCard, { backgroundColor: bg, borderColor }]}>
-      <Text style={[styles.overlapLevel, { color: labelColor }]}>
-        {pair.overlapLevel.toUpperCase()} OVERLAP
-      </Text>
+      <View style={[styles.overlapBadge, { backgroundColor: `${labelColor}1A`, borderColor: `${labelColor}66` }]}>
+        <Text style={[styles.overlapLevel, { color: labelColor }]}>{pair.overlapLevel.toUpperCase()}</Text>
+      </View>
       <Text style={styles.overlapFunds}>
         {pair.fund1} &amp; {pair.fund2}
       </Text>
@@ -276,6 +324,7 @@ export default function PortfolioXRayScreen() {
   const setCurrentProfile = useAppStore((state) => state.setCurrentProfile);
   const portfolioXRay = useAppStore((state) => state.portfolioXRay);
   const setPortfolioXRay = useAppStore((state) => state.setPortfolioXRay);
+  const session = useAppStore((state) => state.session);
   const shareCardRef = useRef<ViewShot | null>(null);
   const { width } = useWindowDimensions();
 
@@ -288,6 +337,9 @@ export default function PortfolioXRayScreen() {
   const [planError, setPlanError] = useState("");
   const [sharing, setSharing] = useState(false);
   const [editingHolding, setEditingHolding] = useState<MFHolding | null>(null);
+  const heroY = useSharedValue(30);
+  const heroOpacity = useSharedValue(0);
+  const planOpacity = useSharedValue(0);
 
   // New metrics state for MutualFundService
   const [portfolioMetrics, setPortfolioMetrics] = useState<PortfolioMetrics | null>(null);
@@ -309,6 +361,27 @@ export default function PortfolioXRayScreen() {
 
   const recommendationMetrics = useMemo(() => portfolioMetrics ? [portfolioMetrics] : [], [portfolioMetrics]);
   const fundNamesList = useMemo(() => holdings.map((h) => h.name), [holdings]);
+
+  useEffect(() => {
+    heroY.value = withTiming(0, { duration: 500, easing: Easing.out(Easing.cubic) });
+    heroOpacity.value = withTiming(1, { duration: 500, easing: Easing.out(Easing.cubic) });
+  }, [heroOpacity, heroY]);
+
+  useEffect(() => {
+    if (!planLoading && (plan || fallbackPlan)) {
+      planOpacity.value = 0;
+      planOpacity.value = withTiming(1, { duration: 500, easing: Easing.out(Easing.cubic) });
+    }
+  }, [fallbackPlan, plan, planLoading, planOpacity]);
+
+  const heroAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: heroOpacity.value,
+    transform: [{ translateY: heroY.value }],
+  }));
+
+  const planAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: planOpacity.value,
+  }));
 
   // Persist to store whenever holdings change
   useEffect(() => {
@@ -360,25 +433,54 @@ export default function PortfolioXRayScreen() {
         setMetricsLoading(true);
 
         // Convert MFHoldings to Fund objects and Transactions for MutualFundService
-        const fundMetricsToCalc: Array<{
-          fund: Fund;
-          transactions: Transaction[];
-        }> = holdings.map((holding) => ({
-          fund: {
-            schemeCode: holding.id,
-            schemeName: holding.name,
-            category: holding.category,
-            nav: holding.nav,
-            expenseRatio: 0.75, // Default; would ideally come from API or input
-          },
-          transactions: [
-            {
-              date: new Date(Date.now() - 365 * 24 * 3600 * 1000),
-              amount: holding.purchaseValue,
-              units: holding.units,
-            },
-          ],
-        }));
+        // Category-based expense ratio defaults (direct plan averages)
+const CATEGORY_EXPENSE_RATIOS: Record<string, number> = {
+  large_cap: 0.95,
+  mid_cap: 1.2,
+  small_cap: 1.4,
+  elss: 1.1,
+  debt: 0.5,
+  hybrid: 1.0,
+  liquid: 0.2,
+  other: 1.0,
+};
+
+const fundMetricsToCalc: Array<{
+  fund: Fund;
+  transactions: Transaction[];
+}> = holdings.map((holding) => {
+  // Use actual transaction dates if available, otherwise fall back to
+  // purchase date estimate based on holding data
+  const transactions: Transaction[] = holding.transactions && holding.transactions.length > 0
+    ? holding.transactions.map((t) => ({
+        date: new Date(t.date),
+        amount: t.amount,
+        units: holding.units / holding.transactions!.length,
+      }))
+    : [
+        {
+          date: new Date(Date.now() - 180 * 24 * 3600 * 1000),
+          amount: -holding.purchaseValue,
+          units: holding.units,
+        },
+        {
+          date: new Date(),
+          amount: holding.currentValue,
+          units: 0,
+        },
+      ];
+
+  return {
+    fund: {
+      schemeCode: holding.id,
+      schemeName: holding.name,
+      category: holding.category,
+      nav: holding.nav,
+      expenseRatio: CATEGORY_EXPENSE_RATIOS[holding.category] ?? 1.0,
+    },
+    transactions,
+  };
+});
 
         // Calculate metrics for each fund
         const metricsResults: Array<{
@@ -486,6 +588,10 @@ export default function PortfolioXRayScreen() {
               nav: nav,
               units: 100,
               xirr: null,
+              transactions: [{
+                date: new Date(),
+                amount: nav * 100,
+              }],
             });
           }
         } catch (e) {
@@ -498,19 +604,27 @@ export default function PortfolioXRayScreen() {
         return;
       }
       
-      setHoldings((prev) => {
-        const next = [...prev, ...newHoldings];
-        setCurrentProfile({
-          ...currentProfile,
-          camsData: {
-            ...currentProfile.camsData,
-            holdings: next,
-          }
-        });
-        return next;
-      });
-      
-      Alert.alert("Success", `Successfully fetched ${newHoldings.length} funds. A default of 100 units is applied. Click the Edit button on the holdings below to adjust your true invested amount.`);
+setHoldings((prev) => {
+  const next = [...prev, ...newHoldings];
+  const updatedProfile = {
+    ...currentProfile,
+    camsData: {
+      ...currentProfile.camsData,
+      holdings: next,
+    }
+  };
+  setCurrentProfile(updatedProfile);
+
+  // Persist to SecureStore + Supabase so holdings survive app restarts
+  void ProfileService.saveProfile(updatedProfile, session).catch((e) => {
+    console.warn("[PortfolioXRay] Failed to persist holdings:", e);
+    Alert.alert("Warning", "Holdings added but not saved to cloud. Please refresh when online.");
+  });
+
+  return next;
+});
+
+Alert.alert("Success", `Successfully added ${newHoldings.length} fund${newHoldings.length !== 1 ? 's' : ''}. Calculating metrics...`);
     } finally {
       setParsing(false);
     }
@@ -540,18 +654,29 @@ export default function PortfolioXRayScreen() {
       );
 
       const mapped = mapCAMSToHoldings(parsed);
-      if (mapped.length === 0) {
-        throw new Error(
-          "No fund holdings found in the image. Try a clearer screenshot showing fund names and values."
-        );
-      }
+if (mapped.length === 0) {
+  throw new Error(
+    "No fund holdings found in the image. Try a clearer screenshot showing fund names and values."
+  );
+}
 
-      setScanPreview(asset.uri);
-      setParseNote(
-        parsed.notes ??
-          `${mapped.length} fund${mapped.length !== 1 ? "s" : ""} detected. Review the values before relying on them for decisions.`
-      );
-      setHoldings(mapped);
+setScanPreview(asset.uri);
+setParseNote(
+  parsed.notes ??
+    `${mapped.length} fund${mapped.length !== 1 ? "s" : ""} detected. Review the values before relying on them for decisions.`
+);
+setHoldings(mapped);
+
+// Persist CAMS parsed holdings so they survive app restarts
+const updatedProfile = {
+  ...currentProfile,
+  camsData: { holdings: mapped },
+};
+setCurrentProfile(updatedProfile);
+void ProfileService.saveProfile(updatedProfile, session).catch((e) => {
+  console.warn("[PortfolioXRay] Failed to persist CAMS holdings:", e);
+  Alert.alert("Warning", "Holdings parsed but not saved to cloud. Please try again when online.");
+});
     } catch (error) {
       Alert.alert(
         "Unable to parse statement",
@@ -608,28 +733,43 @@ export default function PortfolioXRayScreen() {
     }
   }
 
-  function handleSaveEditedHolding(updatedHolding: MFHolding) {
-    setHoldings((prev) =>
-      prev.map((h) => (h.id === updatedHolding.id ? updatedHolding : h))
-    );
-    setEditingHolding(null);
-    Alert.alert("Success", "Holding updated successfully.");
-  }
+function handleSaveEditedHolding(updatedHolding: MFHolding) {
+  setHoldings((prev) => {
+    const next = prev.map((h) => (h.id === updatedHolding.id ? updatedHolding : h));
+    const updatedProfile = {
+      ...currentProfile,
+      camsData: {
+        ...currentProfile.camsData,
+        holdings: next,
+      }
+    };
+    setCurrentProfile(updatedProfile);
+
+    // Persist edited holdings
+    void ProfileService.saveProfile(updatedProfile, session).catch((e) => {
+      console.warn("[PortfolioXRay] Failed to persist edited holding:", e);
+      Alert.alert("Warning", "Changes made but not saved to cloud. Please try again when online.");
+    });
+
+    return next;
+  });
+  setEditingHolding(null);
+  Alert.alert("Success", "Holding updated successfully.");
+}
 
   const overallXirrColor = xirrColor(xray.overallXIRR);
   const chartWidth = Math.min(width - Spacing["3xl"] * 2, 320);
-
+  
   return (
     <Screen scroll>
       {/* ── Hero ── */}
-      <Animatable.View animation="fadeInUp" duration={500} style={styles.hero}>
-        {/* Removed Day 10 */}
+      <Animated.View style={[styles.hero, heroAnimatedStyle]}>
         <Text style={styles.title}>Portfolio X-Ray</Text>
         <Text style={styles.subtitle}>
           Enter your fund holdings or upload a CAMS/KFintech statement to get your true XIRR,
           fund overlap, expense drag, and a personalised rebalancing plan.
         </Text>
-      </Animatable.View>
+      </Animated.View>
 
       {/* ── Manual Input Section (Primary) ── */}
       <Animatable.View animation="fadeInUp" delay={50} duration={500} style={styles.section}>
@@ -647,11 +787,28 @@ export default function PortfolioXRayScreen() {
             Take a clear screenshot of your CAMS or KFintech consolidated statement showing fund
             names, units, NAV, and current value.
           </Text>
-          <Button
-            label={parsing ? "Analysing portfolio..." : "Upload CAMS / KFintech"}
-            loading={parsing}
-            onPress={() => void handleParseStatement()}
-          />
+          <TouchableOpacity
+            disabled={parsing}
+            onPress={async () => {
+              try {
+                await handleParseStatement();
+              } catch (e) {
+                Alert.alert(
+                  "Unable to parse statement",
+                  e instanceof Error ? e.message : "Please try a clearer image."
+                );
+              }
+            }}
+            style={[styles.uploadBtn, parsing ? styles.uploadBtnDisabled : null]}
+          >
+            <Text style={styles.uploadBtnText}>Upload CAMS / KFintech</Text>
+          </TouchableOpacity>
+          {parsing ? (
+            <View style={styles.uploadLoadingRow}>
+              <ActivityIndicator color="#1D9E75" size="small" />
+              <Text style={styles.uploadLoadingText}>Analysing portfolio...</Text>
+            </View>
+          ) : null}
           {scanPreview ? (
             <Image source={{ uri: scanPreview }} style={styles.scanPreview} />
           ) : null}
@@ -662,9 +819,16 @@ export default function PortfolioXRayScreen() {
       {holdings.length > 0 ? (
         <>
           {/* ── New Metrics Dashboard ── */}
-          <Animatable.View animation="fadeInUp" delay={100} duration={500} style={styles.section}>
-            <AtAGlanceHeader metrics={portfolioMetrics} previousValue={xray.totalInvested} />
-          </Animatable.View>
+<Animatable.View animation="fadeInUp" delay={100} duration={500} style={styles.section}>
+  {metricsLoading && !portfolioMetrics ? (
+    <View style={styles.metricsLoadingCard}>
+      <ActivityIndicator size="small" color={Colors.purple} />
+      <Text style={styles.metricsLoadingText}>Fetching live NAV data...</Text>
+    </View>
+  ) : (
+    <AtAGlanceHeader metrics={portfolioMetrics} previousValue={xray.totalInvested} />
+  )}
+</Animatable.View>
 
           {/* ── Fund Performance Table ── */}
           {fundMetrics.length > 0 && (
@@ -687,6 +851,15 @@ export default function PortfolioXRayScreen() {
               />
             </Animatable.View>
           )}
+          {/* ── Metrics loading indicator ── */}
+{metricsLoading && (
+  <Animatable.View animation="fadeIn" duration={300} style={styles.section}>
+    <View style={styles.metricsLoadingCard}>
+      <ActivityIndicator size="small" color={Colors.purple} />
+      <Text style={styles.metricsLoadingText}>Calculating portfolio metrics...</Text>
+    </View>
+  </Animatable.View>
+)}
 
           {/* ── Summary strip ── */}
           <Animatable.View animation="fadeInUp" delay={220} duration={500} style={styles.section}>
@@ -713,28 +886,33 @@ export default function PortfolioXRayScreen() {
           {/* ── Benchmark Comparison ── */}
           <Animatable.View animation="fadeInUp" delay={240} duration={500} style={styles.section}>
             <Text style={styles.sectionTitle}>Benchmark Comparison (NIFTY 50)</Text>
-            <View style={styles.card}>
-              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                <View>
-                  <Text style={{ color: Colors.textSecondary, fontSize: Typography.size.sm, marginBottom: 4 }}>Your XIRR</Text>
-                  <Text style={{ fontFamily: Typography.fontFamily.display, fontSize: 24, color: overallXirrColor }}>
+            <View style={[styles.card, styles.benchmarkCard]}>
+              <View style={styles.benchmarkRow}>
+                <View style={styles.benchmarkCol}>
+                  <Text style={styles.benchmarkLabel}>Your XIRR</Text>
+                  <Text style={[styles.benchmarkValue, { color: overallXirrColor }]}>
                     {xray.overallXIRR !== null ? `${xray.overallXIRR.toFixed(1)}%` : "—"}
                   </Text>
                 </View>
-                <View>
-                  <Text style={{ color: Colors.textSecondary, fontSize: Typography.size.sm, marginBottom: 4 }}>NIFTY 50</Text>
-                  <Text style={{ fontFamily: Typography.fontFamily.display, fontSize: 24, color: Colors.textPrimary }}>
+                <View style={styles.benchmarkCol}>
+                  <Text style={styles.benchmarkLabel}>NIFTY 50</Text>
+                  <Text style={styles.benchmarkValue}>
                     12.5%
                   </Text>
                 </View>
-                <View style={{ alignItems: "flex-end" }}>
-                  <Text style={{ color: Colors.textSecondary, fontSize: Typography.size.sm, marginBottom: 4 }}>Alpha</Text>
-                  <Text style={{ fontFamily: Typography.fontFamily.display, fontSize: 24, color: (xray.overallXIRR || 0) >= 12.5 ? Colors.teal : Colors.red }}>
+                <View style={[styles.benchmarkCol, styles.benchmarkColRight]}>
+                  <Text style={styles.benchmarkLabel}>Alpha</Text>
+                  <Text
+                    style={[
+                      styles.benchmarkValue,
+                      { color: (xray.overallXIRR || 0) >= 12.5 ? Colors.teal : Colors.red },
+                    ]}
+                  >
                     {xray.overallXIRR !== null ? `${((xray.overallXIRR || 0) - 12.5) > 0 ? "+" : ""}${((xray.overallXIRR || 0) - 12.5).toFixed(1)}%` : "—"}
                   </Text>
                 </View>
               </View>
-              <Text style={{ color: Colors.textSecondary, fontSize: Typography.size.sm, lineHeight: 20 }}>
+              <Text style={styles.benchmarkBody}>
                 Alpha is your excess return relative to the benchmark. A positive alpha means your fund selection is outperforming a simple low-cost index fund.
               </Text>
             </View>
@@ -770,10 +948,11 @@ export default function PortfolioXRayScreen() {
           <Animatable.View animation="fadeInUp" delay={300} duration={500} style={styles.section}>
             <Text style={styles.sectionTitle}>Holdings ({holdings.length})</Text>
             <View style={styles.stack}>
-              {holdings.map((h) => (
+              {holdings.map((h, i) => (
                 <HoldingCard
                   key={h.id}
                   holding={h}
+                  index={i}
                   onEdit={() => setEditingHolding(h)}
                 />
               ))}
@@ -798,7 +977,7 @@ export default function PortfolioXRayScreen() {
             <View style={styles.dragCard}>
               <Text style={styles.dragValue}>{formatINR(xray.expenseRatioDrag)}</Text>
               <Text style={styles.dragLabel}>lost per year vs index equivalent (0.1% TER)</Text>
-              <Text style={styles.cardBody}>
+              <Text style={styles.dragBody}>
                 Switching high-expense funds to their direct plan equivalent or a Nifty 50 index
                 fund is the single easiest way to recover this amount annually.
               </Text>
@@ -809,21 +988,28 @@ export default function PortfolioXRayScreen() {
           <Animatable.View animation="fadeInUp" delay={420} duration={500} style={styles.section}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Rebalancing plan</Text>
-              <Button
-                label={planLoading ? "Refreshing..." : "Refresh"}
-                loading={planLoading}
-                onPress={() => void handleRefreshPlan()}
-                variant="secondary"
-              />
+              <TouchableOpacity
+                disabled={planLoading}
+                onPress={async () => {
+                  try {
+                    await handleRefreshPlan();
+                  } catch (e) {
+                    setPlanError(e instanceof Error ? e.message : "Unable to refresh plan.");
+                  }
+                }}
+                style={styles.refreshGhostBtn}
+              >
+                <Text style={styles.refreshGhostText}>{planLoading ? "Refreshing..." : "Refresh"}</Text>
+              </TouchableOpacity>
             </View>
             {planError ? <Text style={styles.warningText}>{planError}</Text> : null}
-            <View style={styles.planCard}>
+            <Animated.View style={[styles.planCard, planAnimatedStyle]}>
               {planLoading && !plan ? (
                 <Text style={styles.loadingText}>FinMentor is building your plan...</Text>
               ) : (
                 <Text style={styles.planText}>{plan || fallbackPlan}</Text>
               )}
-            </View>
+            </Animated.View>
           </Animatable.View>
 
           {/* ── Share ── */}
@@ -834,7 +1020,11 @@ export default function PortfolioXRayScreen() {
                 <Button
                   label="Share Card"
                   loading={sharing}
-                  onPress={() => void handleShare()}
+                  onPress={() => {
+  handleShare().catch((e) => {
+    Alert.alert("Unable to share", e instanceof Error ? e.message : "Please try again.");
+  });
+}}
                 />
               </View>
               <Text style={styles.shareBody}>
@@ -903,15 +1093,16 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   title: {
-    color: Colors.textPrimary,
-    fontFamily: Typography.fontFamily.display,
-    fontSize: Typography.size["2xl"],
+    color: "#FFFFFF",
+    fontFamily: Typography.fontFamily.displaySemiBold,
+    fontSize: 28,
+    letterSpacing: -0.5,
   },
   subtitle: {
-    color: Colors.textSecondary,
+    color: "rgba(255,255,255,0.4)",
     fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.md,
-    lineHeight: 24,
+    fontSize: 14,
+    lineHeight: 20,
   },
   section: {
     gap: Spacing.md,
@@ -950,12 +1141,38 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   uploadCard: {
-    backgroundColor: Colors.card,
-    borderRadius: Radius.lg,
+    backgroundColor: "rgba(29,158,117,0.05)",
+    borderRadius: 20,
     borderWidth: 0.5,
-    borderColor: Colors.border,
+    borderColor: "rgba(29,158,117,0.2)",
     gap: Spacing.lg,
     padding: Spacing.xl,
+  },
+  uploadBtn: {
+    backgroundColor: "#1D9E75",
+    borderRadius: 99,
+    minHeight: 52,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: Spacing.lg,
+  },
+  uploadBtnDisabled: {
+    opacity: 0.6,
+  },
+  uploadBtnText: {
+    color: "#FFFFFF",
+    fontFamily: Typography.fontFamily.bodyMedium,
+    fontSize: Typography.size.md,
+  },
+  uploadLoadingRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: Spacing.sm,
+  },
+  uploadLoadingText: {
+    color: "#1D9E75",
+    fontFamily: Typography.fontFamily.bodyMedium,
+    fontSize: Typography.size.sm,
   },
   scanPreview: {
     width: "100%",
@@ -964,14 +1181,14 @@ const styles = StyleSheet.create({
     resizeMode: "cover",
   },
   parseNote: {
-    color: Colors.teal,
+    color: "#1D9E75",
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.sm,
     lineHeight: 22,
   },
   summaryStrip: {
-    backgroundColor: Colors.navy,
-    borderRadius: Radius.lg,
+    backgroundColor: "#0D1B35",
+    borderRadius: 20,
     flexDirection: "row",
     padding: Spacing.xl,
     gap: Spacing.md,
@@ -982,32 +1199,34 @@ const styles = StyleSheet.create({
   },
   summaryDivider: {
     width: 0.5,
-    backgroundColor: "rgba(255,255,255,0.2)",
+    backgroundColor: "rgba(255,255,255,0.08)",
   },
   summaryLabel: {
-    color: "rgba(255,255,255,0.65)",
-    fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.xs,
+    color: "rgba(255,255,255,0.35)",
+    fontFamily: Typography.fontFamily.bodyMedium,
+    fontSize: 11,
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
   },
   summaryValue: {
     color: Colors.white,
-    fontFamily: Typography.fontFamily.display,
-    fontSize: Typography.size.lg,
+    fontFamily: Typography.fontFamily.displaySemiBold,
+    fontSize: 18,
   },
   summaryXirr: {
-    fontFamily: Typography.fontFamily.display,
-    fontSize: Typography.size.lg,
+    fontFamily: Typography.fontFamily.displaySemiBold,
+    fontSize: 18,
   },
   summaryDrag: {
     color: Colors.gold,
-    fontFamily: Typography.fontFamily.display,
-    fontSize: Typography.size.md,
+    fontFamily: Typography.fontFamily.displaySemiBold,
+    fontSize: 16,
   },
   holdingCard: {
-    backgroundColor: Colors.card,
-    borderRadius: Radius.lg,
+    backgroundColor: "#1A1A1A",
+    borderRadius: 16,
     borderWidth: 0.5,
-    borderColor: Colors.border,
+    borderColor: "#2A2A2A",
     gap: Spacing.md,
     padding: Spacing.lg,
   },
@@ -1018,31 +1237,31 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   holdingName: {
-    color: Colors.textPrimary,
+    color: "#FFFFFF",
     fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.md,
+    fontSize: 14,
     flex: 1,
     lineHeight: 22,
   },
   categoryTag: {
     borderWidth: 0.5,
-    borderRadius: Radius.sm,
+    borderRadius: Radius.full,
     paddingHorizontal: Spacing.sm,
     paddingVertical: 2,
   },
   categoryTagText: {
-    color: Colors.textSecondary,
-    fontFamily: Typography.fontFamily.body,
+    color: "rgba(255,255,255,0.82)",
+    fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.xs,
   },
   editBadge: {
-    backgroundColor: Colors.navy,
-    borderRadius: Radius.sm,
+    backgroundColor: "rgba(212,175,55,0.10)",
+    borderRadius: 6,
     paddingHorizontal: Spacing.sm,
     paddingVertical: 4,
   },
   editBadgeText: {
-    color: "#FFFFFF",
+    color: "#D4AF37",
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.xs,
   },
@@ -1059,13 +1278,23 @@ const styles = StyleSheet.create({
   metaValue: {
     color: Colors.textPrimary,
     fontFamily: Typography.fontFamily.displaySemiBold,
-    fontSize: Typography.size.md,
+    fontSize: 16,
+  },
+  metaXirrValue: {
+    fontSize: 14,
   },
   overlapCard: {
-    borderRadius: Radius.lg,
+    borderRadius: 16,
     borderWidth: 0.5,
     gap: Spacing.sm,
     padding: Spacing.lg,
+  },
+  overlapBadge: {
+    alignSelf: "flex-start",
+    borderRadius: Radius.full,
+    borderWidth: 0.5,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 2,
   },
   overlapLevel: {
     fontFamily: Typography.fontFamily.bodyMedium,
@@ -1073,51 +1302,71 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
   },
   overlapFunds: {
-    color: Colors.textPrimary,
+    color: "#FFFFFF",
     fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.md,
+    fontSize: 14,
     lineHeight: 22,
   },
   overlapReason: {
-    color: Colors.textSecondary,
+    color: "rgba(255,255,255,0.4)",
     fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.sm,
-    lineHeight: 20,
+    fontSize: 12,
+    lineHeight: 18,
   },
   dragCard: {
-    backgroundColor: "#FFF8E8",
-    borderRadius: Radius.lg,
+    backgroundColor: "rgba(212,175,55,0.06)",
+    borderRadius: 20,
     borderWidth: 0.5,
-    borderColor: "#F0D990",
+    borderColor: "rgba(212,175,55,0.2)",
     gap: Spacing.sm,
     padding: Spacing.xl,
   },
   dragValue: {
-    color: Colors.navy,
-    fontFamily: Typography.fontFamily.display,
-    fontSize: Typography.size["2xl"],
+    color: "#D4AF37",
+    fontFamily: Typography.fontFamily.displaySemiBold,
+    fontSize: 28,
   },
   dragLabel: {
-    color: Colors.textSecondary,
+    color: "rgba(255,255,255,0.4)",
     fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.sm,
+    fontSize: 13,
     lineHeight: 20,
   },
+  dragBody: {
+    color: "rgba(255,255,255,0.6)",
+    fontFamily: Typography.fontFamily.body,
+    fontSize: Typography.size.sm,
+    lineHeight: 22,
+  },
   planCard: {
-    backgroundColor: Colors.card,
-    borderRadius: Radius.lg,
+    backgroundColor: "rgba(127,119,221,0.06)",
+    borderRadius: 20,
     borderWidth: 0.5,
-    borderColor: Colors.border,
+    borderColor: "rgba(127,119,221,0.2)",
     padding: Spacing.xl,
   },
   planText: {
-    color: Colors.textPrimary,
+    color: "rgba(255,255,255,0.8)",
     fontFamily: Typography.fontFamily.body,
     fontSize: Typography.size.md,
     lineHeight: 26,
   },
+  refreshGhostBtn: {
+    alignItems: "center",
+    borderColor: "rgba(127,119,221,0.24)",
+    borderRadius: Radius.full,
+    borderWidth: 0.5,
+    justifyContent: "center",
+    minHeight: 32,
+    paddingHorizontal: Spacing.md,
+  },
+  refreshGhostText: {
+    color: "#7F77DD",
+    fontFamily: Typography.fontFamily.bodyMedium,
+    fontSize: 12,
+  },
   loadingText: {
-    color: Colors.purple,
+    color: "#7F77DD",
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.sm,
   },
@@ -1127,10 +1376,10 @@ const styles = StyleSheet.create({
     fontSize: Typography.size.sm,
   },
   shareOuter: {
-    backgroundColor: Colors.navy,
-    borderRadius: Radius.lg,
+    backgroundColor: "#0D1B35",
+    borderRadius: 20,
     borderWidth: 0.5,
-    borderColor: "rgba(12,35,64,0.15)",
+    borderColor: "rgba(255,255,255,0.06)",
     gap: Spacing.md,
     padding: Spacing.xl,
   },
@@ -1207,5 +1456,54 @@ const styles = StyleSheet.create({
     fontFamily: Typography.fontFamily.body,
     fontSize: Typography.size.md,
     lineHeight: 24,
+  },
+  metricsLoadingCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.md,
+    backgroundColor: Colors.card,
+    borderRadius: Radius.lg,
+    borderWidth: 0.5,
+    borderColor: Colors.border,
+    padding: Spacing.xl,
+  },
+  metricsLoadingText: {
+    color: Colors.textSecondary,
+    fontFamily: Typography.fontFamily.bodyMedium,
+    fontSize: Typography.size.sm,
+  },
+  benchmarkRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  benchmarkCol: {
+    flex: 1,
+  },
+  benchmarkColRight: {
+    alignItems: "flex-end",
+  },
+  benchmarkLabel: {
+    color: "rgba(255,255,255,0.4)",
+    fontFamily: Typography.fontFamily.body,
+    fontSize: Typography.size.sm,
+    marginBottom: 4,
+  },
+  benchmarkValue: {
+    color: "#FFFFFF",
+    fontFamily: Typography.fontFamily.displaySemiBold,
+    fontSize: 24,
+  },
+  benchmarkBody: {
+    color: "rgba(255,255,255,0.4)",
+    fontFamily: Typography.fontFamily.body,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  benchmarkCard: {
+    backgroundColor: "#1A1A1A",
+    borderColor: "#2A2A2A",
+    borderRadius: 20,
   },
 });

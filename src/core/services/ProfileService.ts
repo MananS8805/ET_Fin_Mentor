@@ -43,9 +43,19 @@ export interface SaveProfileResult {
 
 import { normalizePhone } from "../utils/phone";
 
+// Safely convert nullable database values to numbers
+function toNumber(value: any): number {
+  const num = Number(value);
+  return isNaN(num) ? 0 : num;
+}
+
 const SECURE_STORE_OPTIONS: SecureStore.SecureStoreOptions = {
   keychainService: "et-finmentor",
 };
+
+// Track concurrent save requests to prevent race conditions
+// See: BUG_REPORT.md - Race Condition in ProfileService.saveProfile
+const pendingSaveRequests = new Set<string>();
 
 function toRow(profile: UserProfileData, userId: string) {
   return {
@@ -139,24 +149,29 @@ export const ProfileService = {
       return localProfile;
     }
 
-    const response = await supabase
-      .from("user_profiles")
-      .select("*")
-      .eq("user_id", session.user.id)
-      .maybeSingle();
+    try {
+      const response = await supabase
+        .from("user_profiles")
+        .select("*")
+        .eq("user_id", session.user.id)
+        .maybeSingle();
 
-    if (response.error) {
-      console.warn("[ProfileService] Supabase profile fetch failed", response.error.message);
+      if (response.error) {
+        console.warn("[ProfileService] Supabase profile fetch failed", response.error.message);
+        return localProfile;
+      }
+
+      if (!response.data) {
+        return localProfile;
+      }
+
+      const remoteProfile = fromRow(response.data as Partial<UserProfileRow>);
+      await saveLocalProfile(remoteProfile);
+      return remoteProfile;
+    } catch (error) {
+      console.error("[ProfileService] Unexpected error loading profile:", error);
       return localProfile;
     }
-
-    if (!response.data) {
-      return localProfile;
-    }
-
-    const remoteProfile = fromRow(response.data as Partial<UserProfileRow>);
-    await saveLocalProfile(remoteProfile);
-    return remoteProfile;
   },
 
   async saveProfile(profile: UserProfileData, session: Session | null): Promise<SaveProfileResult> {
