@@ -20,6 +20,7 @@ interface HoldingEditModalProps {
   isVisible: boolean;
   onClose: () => void;
   onSave: (updatedHolding: MFHolding) => void;
+  onDelete?:() => void; // Optional delete handler
 }
 
 const CATEGORIES: Array<MFHolding["category"]> = [
@@ -49,8 +50,9 @@ export function HoldingEditModal({
   isVisible,
   onClose,
   onSave,
+  onDelete,
 }: HoldingEditModalProps) {
-  const [schemeCode, setSchemeCode] = useState("");
+  const [schemeCode, setSchemeCode] = useState(holding.schemeCode ?? "");
   const [fetchedScheme, setFetchedScheme] = useState<MFScheme | null>(null);
   const [schemeLoading, setSchemeLoading] = useState(false);
   const [schemeError, setSchemeError] = useState("");
@@ -66,7 +68,7 @@ export function HoldingEditModal({
   // Sync state when holding prop changes
   useEffect(() => {
     if (isVisible) {
-      setSchemeCode("");
+      setSchemeCode(holding.schemeCode ?? "");
       setFetchedScheme(null);
       setSchemeError("");
       setName(holding.name);
@@ -136,6 +138,7 @@ export function HoldingEditModal({
     const updatedHolding: MFHolding = {
       ...holding,
       name: name.trim(),
+      schemeCode:    schemeCode.trim() || undefined,
       units: parsedUnits,
       nav: parsedNav,
       currentValue: parsedCurrentValue,
@@ -372,25 +375,25 @@ export function HoldingEditModal({
             </View>
           </ScrollView>
 
-          {/* Footer Buttons */}
+{/* Footer Buttons */}
           <View style={styles.footer}>
-            <Button
-              label="Cancel"
-              onPress={onClose}
-              variant="secondary"
-            />
-            <Button
-              label="Save Changes"
-              onPress={handleSave}
-              variant="primary"
-            />
+            <TouchableOpacity onPress={onClose} style={styles.cancelBtn}>
+              <Text style={styles.cancelBtnText}>Cancel</Text>
+            </TouchableOpacity>
+            {onDelete ? (
+              <TouchableOpacity onPress={onDelete} style={styles.deleteBtn}>
+                <Text style={styles.deleteBtnText}>Remove</Text>
+              </TouchableOpacity>
+            ) : null}
+            <TouchableOpacity onPress={handleSave} style={styles.saveBtn}>
+              <Text style={styles.saveBtnText}>Save Changes</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </View>
     </Modal>
   );
 }
-
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
@@ -653,4 +656,47 @@ const styles = StyleSheet.create({
     color: Colors.navy,
     fontWeight: "700",
   },
+cancelBtn: {
+  flex: 1,
+  alignItems: "center",
+  justifyContent: "center",
+  backgroundColor: "#1E1E23",
+  borderRadius: 100,
+  borderWidth: 0.5,
+  borderColor: "rgba(255,255,255,0.09)",
+  paddingVertical: 14,
+},
+cancelBtnText: {
+  color: "#9A9A94",
+  fontSize: 15,
+  fontWeight: "500",
+},
+deleteBtn: {
+  flex: 1,
+  alignItems: "center",
+  justifyContent: "center",
+  borderRadius: 100,
+  borderWidth: 0.5,
+  borderColor: "rgba(220,78,78,0.3)",
+  paddingVertical: 14,
+},
+deleteBtnText: {
+  color: "#DC4E4E",
+  fontSize: 15,
+  fontWeight: "500",
+},
+saveBtn: {
+  flex: 1,
+  alignItems: "center",
+  justifyContent: "center",
+  backgroundColor: "#C8A84B",
+  borderRadius: 100,
+  paddingVertical: 14,
+},
+saveBtnText: {
+  color: "#0B0B0D",
+  fontSize: 15,
+  fontWeight: "600",
+},
+
 });

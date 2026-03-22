@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { router } from "expo-router";
 import * as Animatable from "react-native-animatable";
 import * as Sharing from "expo-sharing";
 import ViewShot from "react-native-view-shot";
+import Svg, { Line, Rect, Text as SvgText } from "react-native-svg";
 import ConfettiCannon from "react-native-confetti-cannon";
-import { VictoryChart, VictoryTheme } from "victory-native";
 import Animated, {
   Easing,
   runOnJS,
@@ -16,7 +16,6 @@ import Animated, {
 } from "react-native-reanimated";
 
 import { LiquidProgressBar } from "../../src/components/LiquidProgressBar";
-import { VictoryAxisWrapper, VictoryBarWrapper, VictoryLineWrapper } from "../../src/components/VictoryWrappers";
 import { Button } from "../../src/components/Button";
 import { Screen } from "../../src/components/Screen";
 import { SliderField } from "../../src/components/SliderField";
@@ -35,11 +34,24 @@ import { GeminiService } from "../../src/core/services/GeminiService";
 import { useAppStore } from "../../src/core/services/store";
 import { Colors, Radius, Spacing, Typography } from "../../src/core/theme";
 
+// ─── constants ────────────────────────────────────────────────────────────────
+
 const MILESTONE_COLORS: Record<FutureMilestone["key"], string> = {
   emergency: "#1D9E75",
-  halfFire: "#D4AF37",
-  fullFire: "#7F77DD",
+  halfFire:  "#D4AF37",
+  fullFire:  "#7F77DD",
 };
+
+// ─── helpers ──────────────────────────────────────────────────────────────────
+
+function yFmt(v: number): string {
+  if (v >= 10_000_000) return (v / 10_000_000).toFixed(1) + "Cr";
+  if (v >= 100_000)    return (v / 100_000).toFixed(1) + "L";
+  if (v >= 1_000)      return (v / 1_000).toFixed(0) + "K";
+  return v === 0 ? "0" : String(Math.round(v));
+}
+
+// ─── sub-components ───────────────────────────────────────────────────────────
 
 function AnimatedProjectionValue({ value }: { value: number }) {
   const animatedValue = useSharedValue(0);
@@ -52,11 +64,7 @@ function AnimatedProjectionValue({ value }: { value: number }) {
 
   useAnimatedReaction(
     () => Math.round(animatedValue.value),
-    (next, prev) => {
-      if (next !== prev) {
-        runOnJS(setDisplayValue)(next);
-      }
-    },
+    (next, prev) => { if (next !== prev) runOnJS(setDisplayValue)(next); },
     [animatedValue]
   );
 
@@ -69,16 +77,13 @@ function EmptyState() {
       <View style={styles.hero}>
         <Text style={styles.title}>Future You Mirror</Text>
         <Text style={styles.subtitle}>
-          Finish onboarding first so the app can project your future corpus using your real SIP, corpus, retirement
-          goal, and risk context.
+          Finish onboarding first so the app can project your future corpus using your real SIP, corpus, retirement goal, and risk context.
         </Text>
       </View>
-
       <View style={styles.emptyCard}>
         <Text style={styles.emptyTitle}>Your future projection unlocks after profile setup</Text>
         <Text style={styles.emptyBody}>
-          We need your age, corpus, monthly SIP, expenses, and retirement target to build the projection curve and
-          FIRE status.
+          We need your age, corpus, monthly SIP, expenses, and retirement target to build the projection curve and FIRE status.
         </Text>
         <Button label="Go To Onboarding" onPress={() => router.push("/onboarding")} />
       </View>
@@ -87,7 +92,7 @@ function EmptyState() {
 }
 
 function MilestoneCard({ milestone }: { milestone: FutureMilestone }) {
-  const color = MILESTONE_COLORS[milestone.key];
+  const color         = MILESTONE_COLORS[milestone.key];
   const progressValue = useSharedValue(0);
   const targetProgress = Math.max(milestone.progress * 100, milestone.complete ? 100 : 6);
 
@@ -96,12 +101,10 @@ function MilestoneCard({ milestone }: { milestone: FutureMilestone }) {
     progressValue.value = withTiming(targetProgress, { duration: 800, easing: Easing.out(Easing.cubic) });
   }, [progressValue, targetProgress]);
 
-  const fillStyle = useAnimatedStyle(() => ({
-    width: `${progressValue.value}%`,
-  }));
+  const fillStyle = useAnimatedStyle(() => ({ width: `${progressValue.value}%` }));
 
   return (
-    <View style={[styles.milestoneCard, { borderLeftColor: color }]}> 
+    <View style={[styles.milestoneCard, { borderLeftColor: color }]}>
       <View style={styles.milestoneHeader}>
         <Text style={styles.milestoneTitle}>{milestone.label}</Text>
         <Text style={[styles.milestoneStatus, { color }]}>
@@ -113,78 +116,183 @@ function MilestoneCard({ milestone }: { milestone: FutureMilestone }) {
         {formatINR(milestone.current, true)} / {formatINR(milestone.target, true)}
       </Text>
       <View style={styles.progressTrack}>
-        <Animated.View
-          style={[
-            styles.progressFill,
-            fillStyle,
-            {
-              backgroundColor: color,
-            },
-          ]}
-        />
+        <Animated.View style={[styles.progressFill, fillStyle, { backgroundColor: color }]} />
       </View>
     </View>
   );
 }
 
-export default function FutureYouTab() {
-  const profile = useAppStore((state) => state.currentProfile);
-  const shareCardRef = useRef<ViewShot | null>(null);
-  const { width } = useWindowDimensions();
+// ─── custom SVG bar chart ─────────────────────────────────────────────────────
 
-  const [targetAge, setTargetAge] = useState(0);
-  const [sipMultiplier, setSipMultiplier] = useState(1);
-  const [cagr, setCagr] = useState(0.12);
-  const [narrative, setNarrative] = useState("");
-  const [narrativeLoading, setNarrativeLoading] = useState(false);
-  const [narrativeError, setNarrativeError] = useState("");
-  const [sharing, setSharing] = useState(false);
+interface BarChartProps {
+  data:        Array<{ age: number; corpus: number; highlighted: boolean }>;
+  fireTarget:  number;
+  width:       number;
+}
+
+function ProjectionBarChart({ data, fireTarget, width }: BarChartProps) {
+  if (data.length === 0) return null;
+
+  const svgW  = width;
+  const svgH  = 250;
+  const padL  = 50;
+  const padR  = 16;
+  const padT  = 12;
+  const padB  = 36;
+  const plotW = svgW - padL - padR;
+  const plotH = svgH - padT - padB;
+
+  const dataMax = Math.max(...data.map((d) => d.corpus));
+  const yMax    = dataMax * 1.15;
+  const barW    = (plotW / data.length) * 0.55;
+
+  const xPos = (i: number) => padL + (i + 0.5) * (plotW / data.length);
+  const yPos = (v: number) => padT + plotH - (v / yMax) * plotH;
+
+  const yTickCount = 5;
+  const yTicks = Array.from({ length: yTickCount }, (_, i) =>
+    Math.round((yMax / (yTickCount - 1)) * i)
+  );
+
+  const fireY = yPos(fireTarget);
+  const showFireLine = fireTarget > 0 && fireY >= padT && fireY <= padT + plotH;
+
+  return (
+    <Svg width={svgW} height={svgH}>
+
+      {/* Y grid lines + labels */}
+      {yTicks.map((tick) => {
+        const y = yPos(tick);
+        return (
+          <React.Fragment key={"ytick-" + tick}>
+            <Line
+              x1={padL} y1={y} x2={svgW - padR} y2={y}
+              stroke="rgba(255,255,255,0.06)"
+              strokeWidth={0.5}
+            />
+            <SvgText
+              x={padL - 6} y={y + 4}
+              textAnchor="end"
+              fill="rgba(255,255,255,0.35)"
+              fontSize={9}
+            >
+              {yFmt(tick)}
+            </SvgText>
+          </React.Fragment>
+        );
+      })}
+
+      {/* FIRE target dashed line */}
+      {showFireLine ? (
+        <Line
+          x1={padL} y1={fireY} x2={svgW - padR} y2={fireY}
+          stroke="#DC4E4E"
+          strokeWidth={1.5}
+          strokeDasharray="6,4"
+          opacity={0.7}
+        />
+      ) : null}
+
+      {/* Bars */}
+      {data.map((d, i) => {
+        const x   = xPos(i) - barW / 2;
+        const top = yPos(d.corpus);
+        const h   = Math.max(padT + plotH - top, 2);
+        return (
+          <Rect
+            key={"bar-" + d.age}
+            x={x} y={top}
+            width={barW} height={h}
+            fill={d.highlighted ? "#D4AF37" : "#2A4A7F"}
+            rx={3}
+          />
+        );
+      })}
+
+      {/* X axis baseline */}
+      <Line
+        x1={padL} y1={padT + plotH}
+        x2={svgW - padR} y2={padT + plotH}
+        stroke="rgba(255,255,255,0.15)"
+        strokeWidth={0.5}
+      />
+
+      {/* X labels */}
+      {data.map((d, i) => (
+        <SvgText
+          key={"xlabel-" + d.age}
+          x={xPos(i)} y={svgH - 8}
+          textAnchor="middle"
+          fill="rgba(255,255,255,0.4)"
+          fontSize={10}
+        >
+          {String(d.age)}
+        </SvgText>
+      ))}
+
+    </Svg>
+  );
+}
+
+// ─── main screen ──────────────────────────────────────────────────────────────
+
+export default function FutureYouTab() {
+  const profile      = useAppStore((state) => state.currentProfile);
+  const shareCardRef = useRef<ViewShot | null>(null);
+  const { width }    = useWindowDimensions();
+
+  const [targetAge,       setTargetAge]       = useState(0);
+  const [sipMultiplier,   setSipMultiplier]   = useState(1);
+  const [cagr,            setCagr]            = useState(0.12);
+  const [narrative,       setNarrative]       = useState("");
+  const [narrativeLoading,setNarrativeLoading]= useState(false);
+  const [narrativeError,  setNarrativeError]  = useState("");
+  const [sharing,         setSharing]         = useState(false);
   const narrativeOpacity = useSharedValue(0);
 
-  const currentProfile = profile;
-  const minTargetAge = currentProfile ? Math.min(70, currentProfile.age + 5) : 35;
-  const maxTargetAge = 70;
+  const currentProfile  = profile;
+  const minTargetAge    = currentProfile ? Math.min(70, currentProfile.age + 5) : 35;
+  const maxTargetAge    = 70;
   const initialTargetAge = currentProfile
     ? Math.max(minTargetAge, Math.min(maxTargetAge, currentProfile.retirementAge || minTargetAge))
     : 35;
   const selectedAge = targetAge || initialTargetAge;
 
   useEffect(() => {
-    if (!currentProfile) {
-      return;
-    }
-
+    if (!currentProfile) return;
     setTargetAge(initialTargetAge);
     setSipMultiplier(1);
     setCagr(0.12);
   }, [currentProfile?.id, initialTargetAge]);
 
   const scenarioSip = useMemo(
-    () => (currentProfile ? Math.round(currentProfile.monthlySIP * sipMultiplier) : 0),
+    () => currentProfile ? Math.round(currentProfile.monthlySIP * sipMultiplier) : 0,
     [currentProfile, sipMultiplier]
   );
   const projectedCorpus = useMemo(
-    () => (currentProfile ? projectedCorpusForScenario(currentProfile, selectedAge, sipMultiplier, cagr) : 0),
+    () => currentProfile ? projectedCorpusForScenario(currentProfile, selectedAge, sipMultiplier, cagr) : 0,
     [cagr, currentProfile, selectedAge, sipMultiplier]
   );
-  const fireTarget = useMemo(() => (currentProfile ? getFireCorpusTarget(currentProfile) : 0), [currentProfile]);
-  const passiveIncome = useMemo(() => getMonthlyPassiveIncome(projectedCorpus), [projectedCorpus]);
-  const fireAchieved = fireTarget > 0 && projectedCorpus >= fireTarget;
-  const fireGap = Math.max(0, fireTarget - projectedCorpus);
-  const fireProgress = fireTarget > 0 ? Math.min(projectedCorpus / fireTarget, 1) : 0;
-  const milestones = useMemo(
-    () => (currentProfile ? getFutureMilestones(currentProfile, projectedCorpus) : []),
+  const fireTarget = useMemo(
+    () => currentProfile ? getFireCorpusTarget(currentProfile) : 0,
+    [currentProfile]
+  );
+  const passiveIncome  = useMemo(() => getMonthlyPassiveIncome(projectedCorpus), [projectedCorpus]);
+  const fireAchieved   = fireTarget > 0 && projectedCorpus >= fireTarget;
+  const fireGap        = Math.max(0, fireTarget - projectedCorpus);
+  const fireProgress   = fireTarget > 0 ? Math.min(projectedCorpus / fireTarget, 1) : 0;
+  const milestones     = useMemo(
+    () => currentProfile ? getFutureMilestones(currentProfile, projectedCorpus) : [],
     [currentProfile, projectedCorpus]
   );
   const chartData = useMemo(
-    () => (currentProfile ? getFutureProjectionPoints(currentProfile, selectedAge, sipMultiplier, cagr) : []),
+    () => currentProfile ? getFutureProjectionPoints(currentProfile, selectedAge, sipMultiplier, cagr) : [],
     [cagr, currentProfile, selectedAge, sipMultiplier]
   );
   const fallbackNarrative = useMemo(
-    () =>
-      currentProfile
-        ? getFutureYouFallbackNarrative(currentProfile, selectedAge, projectedCorpus, fireTarget, sipMultiplier, cagr)
-        : "",
+    () => currentProfile
+      ? getFutureYouFallbackNarrative(currentProfile, selectedAge, projectedCorpus, fireTarget, sipMultiplier, cagr)
+      : "",
     [cagr, currentProfile, fireTarget, projectedCorpus, selectedAge, sipMultiplier]
   );
   const chartWidth = Math.max(320, width - Spacing["3xl"]);
@@ -196,16 +304,11 @@ export default function FutureYouTab() {
     }
   }, [fallbackNarrative, narrative, narrativeLoading, narrativeOpacity]);
 
-  const narrativeAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: narrativeOpacity.value,
-  }));
+  const narrativeAnimatedStyle = useAnimatedStyle(() => ({ opacity: narrativeOpacity.value }));
 
   useEffect(() => {
-    if (!currentProfile) {
-      setNarrative("");
-      return;
-    }
-
+    if (!currentProfile) { setNarrative(""); return; }
+    const safeProfile = currentProfile;
     let active = true;
 
     const timer = setTimeout(() => {
@@ -213,87 +316,40 @@ export default function FutureYouTab() {
         try {
           setNarrativeLoading(true);
           setNarrativeError("");
-          
-          const nextNarrative = await GeminiService.getFutureYouNarrative(currentProfile, {
-            targetAge: selectedAge,
-            sipMultiplier,
-            cagr,
-            projectedCorpus,
-            fireTarget,
+          const nextNarrative = await GeminiService.getFutureYouNarrative(safeProfile, {
+            targetAge: selectedAge, sipMultiplier, cagr, projectedCorpus, fireTarget,
           });
-
-          if (active) {
-            setNarrative(nextNarrative);
-            setNarrativeError("");
-          }
+          if (active) { setNarrative(nextNarrative); setNarrativeError(""); }
         } catch (error) {
           if (active) {
-            const fallback = getFutureYouFallbackNarrative(
-              currentProfile,
-              selectedAge,
-              projectedCorpus,
-              fireTarget,
-              sipMultiplier,
-              cagr
-            );
-            setNarrative(fallback);
-            const errorMsg = error instanceof Error ? error.message : "Using offline narrative";
-            setNarrativeError(errorMsg);
-            if (!(error instanceof Error && /offline|configured|api key/i.test(error.message))) {
-              console.warn("[FutureYou] Narrative generation failed:", error);
-            }
+            setNarrative(getFutureYouFallbackNarrative(safeProfile, selectedAge, projectedCorpus, fireTarget, sipMultiplier, cagr));
+            setNarrativeError(error instanceof Error ? error.message : "Using offline narrative");
           }
         } finally {
-          if (active) {
-            setNarrativeLoading(false);
-          }
+          if (active) setNarrativeLoading(false);
         }
       })();
     }, 800);
 
-    return () => {
-      active = false;
-      clearTimeout(timer);
-    };
+    return () => { active = false; clearTimeout(timer); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentProfile?.id, currentProfile?.monthlySIP, selectedAge, sipMultiplier, cagr, projectedCorpus, fireTarget]);
 
-  if (!currentProfile) {
-    return <EmptyState />;
-  }
+  if (!currentProfile) return <EmptyState />;
 
   async function handleShare() {
     try {
       setSharing(true);
-
       const canUseBiometric = await AuthService.canUseBiometric();
-
-      if (!canUseBiometric) {
-        throw new Error("Biometric authentication is not available on this device.");
-      }
-
+      if (!canUseBiometric) throw new Error("Biometric authentication is not available on this device.");
       const verified = await AuthService.promptBiometric("Confirm before sharing your Future You card");
-
-      if (!verified) {
-        return;
-      }
-
-      if (!(await Sharing.isAvailableAsync())) {
-        throw new Error("Sharing is not available on this device.");
-      }
-
+      if (!verified) return;
+      if (!(await Sharing.isAvailableAsync())) throw new Error("Sharing is not available on this device.");
       const uri = await shareCardRef.current?.capture?.();
-
-      if (!uri) {
-        throw new Error("Unable to generate the share card.");
-      }
-
-      await Sharing.shareAsync(uri, {
-        dialogTitle: `Share your age ${selectedAge} Future You card`,
-      });
+      if (!uri) throw new Error("Unable to generate the share card.");
+      await Sharing.shareAsync(uri, { dialogTitle: `Share your age ${selectedAge} Future You card` });
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : "Please try again.";
-      Alert.alert("Unable to share projection", errorMsg);
-      console.error("[FutureYou] Share error:", error);
+      Alert.alert("Unable to share projection", error instanceof Error ? error.message : "Please try again.");
     } finally {
       setSharing(false);
     }
@@ -301,6 +357,8 @@ export default function FutureYouTab() {
 
   return (
     <Screen scroll>
+
+      {/* ── hero ── */}
       <Animatable.View animation="fadeInUp" duration={500} style={styles.hero}>
         <Text style={styles.title}>Future You Mirror</Text>
         <Text style={styles.subtitle}>
@@ -308,6 +366,7 @@ export default function FutureYouTab() {
         </Text>
       </Animatable.View>
 
+      {/* ── projection card ── */}
       <Animatable.View animation="fadeInUp" delay={90} duration={500} style={styles.projectionCard}>
         {fireAchieved ? (
           <View pointerEvents="none" style={styles.confettiMask}>
@@ -321,11 +380,9 @@ export default function FutureYouTab() {
               <AnimatedProjectionValue value={projectedCorpus} />
             </View>
           </View>
-          
           <Text style={[styles.statusBadge, fireAchieved ? styles.statusBadgeSuccess : styles.statusBadgeBuilding]}>
             {fireAchieved ? "FIRE achieved" : "Building towards FIRE"}
           </Text>
-          
         </View>
 
         <View style={styles.metricRow}>
@@ -344,13 +401,11 @@ export default function FutureYouTab() {
         <Text style={styles.projectionBody}>
           {fireAchieved
             ? `This path clears your FIRE target of ${formatINR(fireTarget, true)} by age ${selectedAge}.`
-            : `You are ${formatINR(fireGap, true)} short of your FIRE target of ${formatINR(
-                fireTarget,
-                true
-              )} in this scenario.`}
+            : `You are ${formatINR(fireGap, true)} short of your FIRE target of ${formatINR(fireTarget, true)} in this scenario.`}
         </Text>
       </Animatable.View>
 
+      {/* ── what-if controls ── */}
       <Animatable.View animation="fadeInUp" delay={150} duration={500} style={styles.section}>
         <Text style={styles.sectionTitle}>What-if controls</Text>
         <View style={styles.sliderStack}>
@@ -394,6 +449,7 @@ export default function FutureYouTab() {
         </View>
       </Animatable.View>
 
+      {/* ── milestones ── */}
       <Animatable.View animation="fadeInUp" delay={210} duration={500} style={styles.section}>
         <Text style={styles.sectionTitle}>Milestone progress</Text>
         <View style={styles.milestoneStack}>
@@ -403,69 +459,22 @@ export default function FutureYouTab() {
         </View>
       </Animatable.View>
 
+      {/* ── projection chart ── */}
       <Animatable.View animation="fadeInUp" delay={260} duration={500} style={styles.section}>
         <Text style={styles.sectionTitle}>5-year projection curve</Text>
         <View style={styles.chartCard}>
           <Text style={styles.chartBody}>
             Every bar is a future age checkpoint. The selected age is highlighted in gold.
           </Text>
-
-          <VictoryChart
-            domainPadding={{ x: 18, y: 22 }}
-            height={260}
-            padding={{ top: 20, bottom: 42, left: 64, right: 18 }}
-            theme={VictoryTheme.material}
+          <ProjectionBarChart
+            data={chartData}
+            fireTarget={fireTarget}
             width={chartWidth}
-          >
-            <VictoryAxisWrapper
-              style={{
-                axis: { stroke: Colors.border },
-                grid: { stroke: "transparent" },
-                tickLabels: {
-                  fill: Colors.textSecondary,
-                  fontFamily: Typography.fontFamily.body,
-                  fontSize: 11,
-                },
-              }}
-            />
-            <VictoryAxisWrapper
-              dependentAxis
-              tickFormat={(value: number) => formatINR(value, true)}
-              style={{
-                axis: { stroke: "transparent" },
-                grid: { stroke: "#E8EDF4" },
-                tickLabels: {
-                  fill: Colors.textSecondary,
-                  fontFamily: Typography.fontFamily.body,
-                  fontSize: 10,
-                },
-              }}
-            />
-            <VictoryBarWrapper
-              animate={{ duration: 1000, onLoad: { duration: 700 } }}
-              barRatio={0.72}
-              cornerRadius={{ top: 6 }}
-              data={chartData}
-              style={{
-                data: {
-                  fill: ({ datum }: { datum: any }) => (datum.highlighted ? "#D4AF37" : "#2A4A7F"),
-                },
-              }}
-              x="age"
-              y="corpus"
-            />
-            
-            <VictoryLineWrapper
-  animate={{ duration: 1050, onLoad: { duration: 760 } }}
-  data={chartData.map((d) => ({ age: d.age, target: fireTarget }))}
-  style={{ data: { stroke: Colors.red, strokeDasharray: "6,4", strokeWidth: 1.5, opacity: 0.7 } }}
-  x="age"
-  y="target"
-/>
-          </VictoryChart>
+          />
         </View>
       </Animatable.View>
 
+      {/* ── AI narrative ── */}
       <Animatable.View animation="fadeInUp" delay={320} duration={500} style={styles.section}>
         <Text style={styles.sectionTitle}>AI narrative</Text>
         <Animated.View style={[styles.narrativeCard, narrativeAnimatedStyle]}>
@@ -478,6 +487,7 @@ export default function FutureYouTab() {
         </Animated.View>
       </Animatable.View>
 
+      {/* ── share ── */}
       <Animatable.View animation="fadeInUp" delay={380} duration={500} style={styles.section}>
         <View style={styles.shareCard}>
           <View style={styles.shareHeader}>
@@ -494,12 +504,12 @@ export default function FutureYouTab() {
             />
           </View>
           <Text style={styles.shareBody}>
-            This detailed card includes your projected corpus at age {selectedAge}, so biometric confirmation is
-            required before sharing.
+            This detailed card includes your projected corpus at age {selectedAge}, so biometric confirmation is required before sharing.
           </Text>
         </View>
       </Animatable.View>
 
+      {/* ── ViewShot capture card ── */}
       <View pointerEvents="none" style={styles.captureContainer}>
         <ViewShot ref={shareCardRef} options={{ format: "png", quality: 1 }}>
           <View collapsable={false} style={styles.captureCard}>
@@ -516,336 +526,79 @@ export default function FutureYouTab() {
           </View>
         </ViewShot>
       </View>
+
     </Screen>
   );
 }
 
+// ─── styles ───────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
-  hero: {
-    gap: Spacing.md,
-    marginBottom: Spacing.xl,
-  },
-  eyebrow: {
-    color: Colors.purple,
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.sm,
-    letterSpacing: 0.8,
-    textTransform: "uppercase",
-  },
-  title: {
-    color: "#FFFFFF",
-    fontFamily: Typography.fontFamily.displaySemiBold,
-    fontSize: 28,
-    letterSpacing: -0.5,
-  },
-  subtitle: {
-    color: "rgba(255,255,255,0.4)",
-    fontFamily: Typography.fontFamily.body,
-    fontSize: 14,
-    lineHeight: 20,
-  },
+  hero:     { gap: Spacing.md, marginBottom: Spacing.xl },
+  eyebrow:  { color: Colors.purple, fontFamily: Typography.fontFamily.bodyMedium, fontSize: Typography.size.sm, letterSpacing: 0.8, textTransform: "uppercase" },
+  title:    { color: "#FFFFFF", fontFamily: Typography.fontFamily.displaySemiBold, fontSize: 28, letterSpacing: -0.5 },
+  subtitle: { color: "rgba(255,255,255,0.4)", fontFamily: Typography.fontFamily.body, fontSize: 14, lineHeight: 20 },
+
   projectionCard: {
     backgroundColor: "#0D1B35",
-    borderRadius: 24,
-    borderWidth: 0.5,
-    borderColor: "rgba(255,255,255,0.06)",
-    gap: Spacing.lg,
-    marginBottom: Spacing.xl,
-    overflow: "hidden",
-    padding: Spacing.xl,
+    borderRadius: 24, borderWidth: 0.5, borderColor: "rgba(255,255,255,0.06)",
+    gap: Spacing.lg, marginBottom: Spacing.xl, overflow: "hidden", padding: Spacing.xl,
   },
-  confettiMask: {
-    bottom: 0,
-    left: 0,
-    position: "absolute",
-    right: 0,
-    top: 0,
-  },
-  projectionHeader: {
-    gap: Spacing.md,
-  },
-  projectionLabel: {
-    color: "rgba(255,255,255,0.4)",
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: 12,
-    letterSpacing: 0.8,
-    marginBottom: Spacing.sm,
-    textTransform: "uppercase",
-  },
-  projectionValue: {
-    color: "#FFFFFF",
-    fontFamily: Typography.fontFamily.numeric,
-    fontSize: 40,
-    fontWeight: "700",
-    letterSpacing: -1,
-  },
-  glowWrap: {
-    alignSelf: "flex-start",
-    justifyContent: "center",
-    minHeight: 54,
-  },
-  statusBadge: {
-    alignSelf: "flex-start",
-    borderWidth: 0.5,
-    borderRadius: Radius.full,
-    overflow: "hidden",
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-  },
-  statusBadgeBuilding: {
-    backgroundColor: "rgba(212,175,55,0.15)",
-    borderColor: "rgba(212,175,55,0.3)",
-    color: "#D4AF37",
-  },
-  statusBadgeSuccess: {
-    backgroundColor: "rgba(29,158,117,0.15)",
-    borderColor: "rgba(29,158,117,0.3)",
-    color: "#1D9E75",
-  },
-  metricRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: Spacing.md,
-  },
-  metricChip: {
-    backgroundColor: "rgba(255,255,255,0.05)",
-    borderRadius: Radius.md,
-    borderWidth: 0.5,
-    borderColor: "rgba(255,255,255,0.08)",
-    flex: 1,
-    minWidth: 140,
-    padding: Spacing.md,
-  },
-  metricLabel: {
-    color: "rgba(255,255,255,0.68)",
-    fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.sm,
-    marginBottom: Spacing.xs,
-  },
-  metricValue: {
-    color: Colors.white,
-    fontFamily: Typography.fontFamily.displaySemiBold,
-    fontSize: Typography.size.lg,
-  },
-  projectionBody: {
-    color: "rgba(255,255,255,0.65)",
-    fontFamily: Typography.fontFamily.body,
-    fontSize: 13,
-    lineHeight: 20,
-  },
-  section: {
-    gap: Spacing.md,
-    marginBottom: Spacing.xl,
-  },
-  sectionTitle: {
-    color: "#FFFFFF",
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: 16,
-  },
-  sliderStack: {
-    gap: Spacing.sm,
-  },
-  centerControlValue: {
-    alignSelf: "center",
-    color: "#D4AF37",
-    fontFamily: Typography.fontFamily.numeric,
-    fontSize: 24,
-    fontWeight: "700",
-    marginBottom: Spacing.sm,
-  },
-  milestoneStack: {
-    gap: Spacing.md,
-  },
-  milestoneCard: {
-    backgroundColor: "#1A1A1A",
-    borderBottomLeftRadius: 0,
-    borderBottomRightRadius: 16,
-    borderLeftWidth: 3,
-    borderTopLeftRadius: 0,
-    borderTopRightRadius: 16,
-    borderWidth: 0.5,
-    borderColor: "#2A2A2A",
-    gap: Spacing.sm,
-    padding: Spacing.lg,
-  },
-  milestoneHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  milestoneTitle: {
-    color: "#FFFFFF",
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.md,
-  },
-  milestoneStatus: {
-    fontFamily: Typography.fontFamily.displaySemiBold,
-    fontSize: Typography.size.sm,
-  },
-  milestoneHelper: {
-    color: "rgba(255,255,255,0.4)",
-    fontFamily: Typography.fontFamily.body,
-    fontSize: 12,
-  },
-  milestoneValue: {
-    color: "#FFFFFF",
-    fontFamily: Typography.fontFamily.displaySemiBold,
-    fontSize: 14,
-  },
-  progressTrack: {
-    backgroundColor: "rgba(255,255,255,0.06)",
-    borderRadius: Radius.full,
-    height: 6,
-    overflow: "hidden",
-  },
-  progressFill: {
-    borderRadius: Radius.full,
-    height: "100%",
-  },
-  chartCard: {
-    backgroundColor: "#1A1A1A",
-    borderRadius: 20,
-    borderWidth: 0.5,
-    borderColor: "#2A2A2A",
-    overflow: "hidden",
-    paddingVertical: Spacing.lg,
-  },
-  chartBody: {
-    color: "rgba(255,255,255,0.35)",
-    fontFamily: Typography.fontFamily.body,
-    fontSize: 12,
-    lineHeight: 22,
-    paddingHorizontal: Spacing.lg,
-  },
-  narrativeCard: {
-    backgroundColor: "rgba(127,119,221,0.06)",
-    borderRadius: 20,
-    borderWidth: 0.5,
-    borderColor: "rgba(127,119,221,0.2)",
-    gap: Spacing.sm,
-    padding: 20,
-  },
-  aiBadge: {
-    alignSelf: "flex-start",
-    backgroundColor: "rgba(127,119,221,0.15)",
-    borderRadius: Radius.full,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: 4,
-  },
-  aiBadgeText: {
-    color: "#7F77DD",
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: 11,
-  },
-  loadingText: {
-    color: "#7F77DD",
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.sm,
-  },
-  warningText: {
-    color: Colors.red,
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.sm,
-  },
-  narrativeText: {
-    color: "rgba(255,255,255,0.8)",
-    fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.md,
-    lineHeight: 24,
-  },
-  shareCard: {
-    backgroundColor: "rgba(212,175,55,0.06)",
-    borderRadius: 20,
-    borderWidth: 0.5,
-    borderColor: "rgba(212,175,55,0.2)",
-    gap: Spacing.md,
-    padding: Spacing.xl,
-  },
-  shareHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  shareTitle: {
-    color: "#FFFFFF",
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.lg,
-  },
-  shareBody: {
-    color: "rgba(255,255,255,0.75)",
-    fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.sm,
-    lineHeight: 22,
-  },
-  shareButton: {
-    borderRadius: 99,
-  },
-  captureContainer: {
-    left: -9999,
-    position: "absolute",
-    top: 0,
-  },
-  captureCard: {
-    backgroundColor: Colors.card,
-    borderRadius: Radius.lg,
-    borderWidth: 0.5,
-    borderColor: Colors.border,
-    padding: 28,
-    width: 340,
-  },
-  captureBrand: {
-    color: Colors.navy,
-    fontFamily: Typography.fontFamily.display,
-    fontSize: Typography.size.lg,
-    marginBottom: Spacing.lg,
-  },
-  captureEyebrow: {
-    color: Colors.textSecondary,
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.sm,
-    marginBottom: Spacing.sm,
-    textTransform: "uppercase",
-  },
-  captureValue: {
-    color: Colors.textPrimary,
-    fontFamily: Typography.fontFamily.display,
-    fontSize: 44,
-    marginBottom: Spacing.sm,
-  },
-  captureStatus: {
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.md,
-    marginBottom: Spacing.lg,
-  },
-  captureDivider: {
-    backgroundColor: Colors.border,
-    height: 1,
-    marginBottom: Spacing.lg,
-  },
-  captureLine: {
-    color: Colors.textPrimary,
-    fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.md,
-    lineHeight: 24,
-    marginBottom: Spacing.sm,
-  },
-  emptyCard: {
-    backgroundColor: Colors.card,
-    borderRadius: Radius.lg,
-    borderWidth: 0.5,
-    borderColor: Colors.border,
-    gap: Spacing.md,
-    padding: Spacing.xl,
-  },
-  emptyTitle: {
-    color: Colors.textPrimary,
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.lg,
-  },
-  emptyBody: {
-    color: Colors.textSecondary,
-    fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.md,
-    lineHeight: 24,
-  },
+  confettiMask:    { bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
+  projectionHeader:{ gap: Spacing.md },
+  projectionLabel: { color: "rgba(255,255,255,0.4)", fontFamily: Typography.fontFamily.bodyMedium, fontSize: 12, letterSpacing: 0.8, marginBottom: Spacing.sm, textTransform: "uppercase" },
+  projectionValue: { color: "#FFFFFF", fontFamily: Typography.fontFamily.numeric, fontSize: 40, fontWeight: "700", letterSpacing: -1 },
+  glowWrap:        { alignSelf: "flex-start", justifyContent: "center", minHeight: 54 },
+  statusBadge:     { alignSelf: "flex-start", borderWidth: 0.5, borderRadius: Radius.full, overflow: "hidden", paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm },
+  statusBadgeBuilding: { backgroundColor: "rgba(212,175,55,0.15)", borderColor: "rgba(212,175,55,0.3)", color: "#D4AF37" },
+  statusBadgeSuccess:  { backgroundColor: "rgba(29,158,117,0.15)", borderColor: "rgba(29,158,117,0.3)", color: "#1D9E75" },
+  metricRow:  { flexDirection: "row", flexWrap: "wrap", gap: Spacing.md },
+  metricChip: { backgroundColor: "rgba(255,255,255,0.05)", borderRadius: Radius.md, borderWidth: 0.5, borderColor: "rgba(255,255,255,0.08)", flex: 1, minWidth: 140, padding: Spacing.md },
+  metricLabel:{ color: "rgba(255,255,255,0.68)", fontFamily: Typography.fontFamily.body, fontSize: Typography.size.sm, marginBottom: Spacing.xs },
+  metricValue:{ color: Colors.white, fontFamily: Typography.fontFamily.displaySemiBold, fontSize: Typography.size.lg },
+  projectionBody: { color: "rgba(255,255,255,0.65)", fontFamily: Typography.fontFamily.body, fontSize: 13, lineHeight: 20 },
+
+  section:      { gap: Spacing.md, marginBottom: Spacing.xl },
+  sectionTitle: { color: "#FFFFFF", fontFamily: Typography.fontFamily.bodyMedium, fontSize: 16 },
+  sliderStack:  { gap: Spacing.sm },
+  centerControlValue: { alignSelf: "center", color: "#D4AF37", fontFamily: Typography.fontFamily.numeric, fontSize: 24, fontWeight: "700", marginBottom: Spacing.sm },
+
+  milestoneStack: { gap: Spacing.md },
+  milestoneCard:  { backgroundColor: "#1A1A1A", borderBottomLeftRadius: 0, borderBottomRightRadius: 16, borderLeftWidth: 3, borderTopLeftRadius: 0, borderTopRightRadius: 16, borderWidth: 0.5, borderColor: "#2A2A2A", gap: Spacing.sm, padding: Spacing.lg },
+  milestoneHeader:{ alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
+  milestoneTitle: { color: "#FFFFFF", fontFamily: Typography.fontFamily.bodyMedium, fontSize: Typography.size.md },
+  milestoneStatus:{ fontFamily: Typography.fontFamily.displaySemiBold, fontSize: Typography.size.sm },
+  milestoneHelper:{ color: "rgba(255,255,255,0.4)", fontFamily: Typography.fontFamily.body, fontSize: 12 },
+  milestoneValue: { color: "#FFFFFF", fontFamily: Typography.fontFamily.displaySemiBold, fontSize: 14 },
+  progressTrack:  { backgroundColor: "rgba(255,255,255,0.06)", borderRadius: Radius.full, height: 6, overflow: "hidden" },
+  progressFill:   { borderRadius: Radius.full, height: "100%" },
+
+  chartCard: { backgroundColor: "#1A1A1A", borderRadius: 20, borderWidth: 0.5, borderColor: "#2A2A2A", overflow: "hidden", paddingVertical: Spacing.lg },
+  chartBody: { color: "rgba(255,255,255,0.35)", fontFamily: Typography.fontFamily.body, fontSize: 12, lineHeight: 22, paddingHorizontal: Spacing.lg, marginBottom: Spacing.sm },
+
+  narrativeCard: { backgroundColor: "rgba(127,119,221,0.06)", borderRadius: 20, borderWidth: 0.5, borderColor: "rgba(127,119,221,0.2)", gap: Spacing.sm, padding: 20 },
+  aiBadge:       { alignSelf: "flex-start", backgroundColor: "rgba(127,119,221,0.15)", borderRadius: Radius.full, paddingHorizontal: Spacing.md, paddingVertical: 4 },
+  aiBadgeText:   { color: "#7F77DD", fontFamily: Typography.fontFamily.bodyMedium, fontSize: 11 },
+  loadingText:   { color: "#7F77DD", fontFamily: Typography.fontFamily.bodyMedium, fontSize: Typography.size.sm },
+  warningText:   { color: Colors.red, fontFamily: Typography.fontFamily.bodyMedium, fontSize: Typography.size.sm },
+  narrativeText: { color: "rgba(255,255,255,0.8)", fontFamily: Typography.fontFamily.body, fontSize: Typography.size.md, lineHeight: 24 },
+
+  shareCard:   { backgroundColor: "rgba(212,175,55,0.06)", borderRadius: 20, borderWidth: 0.5, borderColor: "rgba(212,175,55,0.2)", gap: Spacing.md, padding: Spacing.xl },
+  shareHeader: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
+  shareTitle:  { color: "#FFFFFF", fontFamily: Typography.fontFamily.bodyMedium, fontSize: Typography.size.lg },
+  shareBody:   { color: "rgba(255,255,255,0.75)", fontFamily: Typography.fontFamily.body, fontSize: Typography.size.sm, lineHeight: 22 },
+  shareButton: { borderRadius: 99 },
+
+  captureContainer: { left: -9999, position: "absolute", top: 0 },
+  captureCard:      { backgroundColor: Colors.card, borderRadius: Radius.lg, borderWidth: 0.5, borderColor: Colors.border, padding: 28, width: 340 },
+  captureBrand:     { color: Colors.navy, fontFamily: Typography.fontFamily.display, fontSize: Typography.size.lg, marginBottom: Spacing.lg },
+  captureEyebrow:   { color: Colors.textSecondary, fontFamily: Typography.fontFamily.bodyMedium, fontSize: Typography.size.sm, marginBottom: Spacing.sm, textTransform: "uppercase" },
+  captureValue:     { color: Colors.textPrimary, fontFamily: Typography.fontFamily.display, fontSize: 44, marginBottom: Spacing.sm },
+  captureStatus:    { fontFamily: Typography.fontFamily.bodyMedium, fontSize: Typography.size.md, marginBottom: Spacing.lg },
+  captureDivider:   { backgroundColor: Colors.border, height: 1, marginBottom: Spacing.lg },
+  captureLine:      { color: Colors.textPrimary, fontFamily: Typography.fontFamily.body, fontSize: Typography.size.md, lineHeight: 24, marginBottom: Spacing.sm },
+
+  emptyCard:  { backgroundColor: Colors.card, borderRadius: Radius.lg, borderWidth: 0.5, borderColor: Colors.border, gap: Spacing.md, padding: Spacing.xl },
+  emptyTitle: { color: Colors.textPrimary, fontFamily: Typography.fontFamily.bodyMedium, fontSize: Typography.size.lg },
+  emptyBody:  { color: Colors.textSecondary, fontFamily: Typography.fontFamily.body, fontSize: Typography.size.md, lineHeight: 24 },
 });

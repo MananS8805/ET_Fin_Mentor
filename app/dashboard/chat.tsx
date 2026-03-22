@@ -504,7 +504,7 @@ export default function ChatTab() {
               style={[styles.sendBtn, !input.trim() || sending ? styles.sendBtnDisabled : null]}
             >
               {sending ? (
-                <ActivityIndicator color={Colors.navy} />
+                <ActivityIndicator color={Colors.bg} />
               ) : (
                 <Text style={styles.sendBtnIcon}>▶</Text>
               )}
@@ -558,8 +558,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   heroCard: {
-    backgroundColor: "#1A1A1A",
-    borderColor: "#2A2A2A",
+    backgroundColor: Colors.s1,
+    borderColor: Colors.b1,
     borderRadius: 20,
     borderWidth: 0.5,
     marginBottom: Spacing.lg,
@@ -576,14 +576,13 @@ const styles = StyleSheet.create({
     paddingRight: Spacing.md,
   },
   heroTitle: {
-    color: Colors.white,
-    fontFamily: Typography.fontFamily.display,
+    color: Colors.t0,
+    fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: 20,
-    fontWeight: "700",
     marginBottom: 4,
   },
   heroSubtitle: {
-    color: "rgba(255,255,255,0.4)",
+    color: Colors.t2,
     fontFamily: Typography.fontFamily.body,
     fontSize: 13,
     lineHeight: 20,
@@ -614,29 +613,29 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.xs,
   },
   savingsPill: {
-    backgroundColor: "rgba(29,158,117,0.12)",
-    borderColor: "rgba(29,158,117,0.3)",
+    backgroundColor: Colors.tealDim,
+    borderColor: "rgba(31,190,114,0.30)",
   },
   emergencyPill: {
-    backgroundColor: "rgba(212,175,55,0.12)",
-    borderColor: "rgba(212,175,55,0.3)",
+    backgroundColor: Colors.goldDim,
+    borderColor: "rgba(200,168,75,0.30)",
   },
   metricPillText: {
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.xs,
   },
   savingsPillText: {
-    color: "#1D9E75",
+    color: Colors.teal,
   },
   emergencyPillText: {
-    color: "#D4AF37",
+    color: Colors.gold,
   },
   providerPill: {
     backgroundColor: "rgba(59,130,246,0.12)",
     borderColor: "rgba(59,130,246,0.35)",
   },
   providerPillText: {
-    color: "#93C5FD",
+    color: Colors.blue,
   },
   messagesContent: {
     gap: Spacing.md,
@@ -660,26 +659,26 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.md,
   },
   userBubble: {
-    backgroundColor: "#D4AF37",
+    backgroundColor: Colors.gold,
     borderBottomLeftRadius: 18,
     borderBottomRightRadius: 4,
-    borderColor: "#D4AF37",
+    borderColor: Colors.gold,
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
   },
   modelBubble: {
-    backgroundColor: "#1E1E1E",
+    backgroundColor: Colors.s2,
     borderBottomLeftRadius: 4,
     borderBottomRightRadius: 18,
-    borderColor: "#2A2A2A",
+    borderColor: Colors.b1,
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
   },
   errorBubble: {
-    backgroundColor: "rgba(226,75,74,0.1)",
+    backgroundColor: Colors.redDim,
     borderBottomLeftRadius: 4,
     borderBottomRightRadius: 18,
-    borderColor: "rgba(226,75,74,0.25)",
+    borderColor: "rgba(220,78,78,0.25)",
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
   },
@@ -689,13 +688,13 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   userText: {
-    color: "#0A0A0A",
+    color: Colors.bg,
   },
   modelText: {
-    color: Colors.white,
+    color: Colors.t0,
   },
   errorText: {
-    color: "#FF6B6B",
+    color: Colors.red,
   },
   metaRow: {
     alignItems: "center",
@@ -716,8 +715,8 @@ const styles = StyleSheet.create({
     marginTop: Spacing.xs,
   },
   quickReplyChip: {
-    backgroundColor: "rgba(212,175,55,0.08)",
-    borderColor: "rgba(212,175,55,0.25)",
+    backgroundColor: Colors.s2,
+    borderColor: Colors.b1,
     borderRadius: Radius.full,
     borderWidth: 0.5,
     paddingHorizontal: Spacing.md,
@@ -728,27 +727,27 @@ const styles = StyleSheet.create({
     borderColor: "rgba(226,75,74,0.25)",
   },
   quickReplyLabel: {
-    color: "#D4AF37",
+    color: Colors.t1,
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: 13,
   },
   quickReplyCriticalLabel: {
-    color: "#FF6B6B",
+    color: Colors.red,
   },
   composerShell: {
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.sm,
   },
   composerBar: {
-    backgroundColor: "#141414",
-    borderTopColor: "#1E1E1E",
+    backgroundColor: Colors.s1,
+    borderTopColor: Colors.b1,
     borderTopWidth: 0.5,
     paddingTop: Spacing.sm,
   },
   composerInner: {
     alignItems: "flex-end",
-    backgroundColor: "#1E1E1E",
-    borderColor: "#2A2A2A",
+    backgroundColor: Colors.s2,
+    borderColor: Colors.b1,
     borderRadius: 20,
     borderWidth: 0.5,
     flexDirection: "row",
@@ -757,7 +756,7 @@ const styles = StyleSheet.create({
     padding: Spacing.sm,
   },
   input: {
-    color: Colors.white,
+    color: Colors.t0,
     flex: 1,
     fontFamily: Typography.fontFamily.body,
     fontSize: Typography.size.md,
@@ -768,7 +767,7 @@ const styles = StyleSheet.create({
   },
   sendBtn: {
     alignItems: "center",
-    backgroundColor: "#D4AF37",
+    backgroundColor: Colors.gold,
     borderRadius: 22,
     height: 44,
     justifyContent: "center",
@@ -778,7 +777,7 @@ const styles = StyleSheet.create({
     opacity: 0.3,
   },
   sendBtnIcon: {
-    color: "#0A0A0A",
+    color: Colors.bg,
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: 16,
     marginLeft: 1,
@@ -792,21 +791,21 @@ const styles = StyleSheet.create({
     padding: Spacing.lg,
   },
   expiredText: {
-    color: "#FF6B6B",
+    color: Colors.red,
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.sm,
   },
   expiredSigninBtn: {
     alignItems: "center",
     alignSelf: "flex-start",
-    backgroundColor: "#D4AF37",
+    backgroundColor: Colors.gold,
     borderRadius: Radius.full,
     justifyContent: "center",
     minHeight: 36,
     paddingHorizontal: Spacing.lg,
   },
   expiredSigninText: {
-    color: "#0A0A0A",
+    color: Colors.bg,
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: 13,
   },
@@ -819,7 +818,7 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   typingDot: {
-    backgroundColor: "#D4AF37",
+    backgroundColor: Colors.gold,
     borderRadius: 4,
     height: 8,
     width: 8,
@@ -870,7 +869,7 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.sm,
     position: "absolute",
     right: Spacing.lg,
-    shadowColor: "#000",
+    shadowColor: Colors.black,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.26,
     shadowRadius: 8,

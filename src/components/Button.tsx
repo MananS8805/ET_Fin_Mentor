@@ -64,9 +64,9 @@ export function Button({
   };
 
   let textColor: string = Colors.textPrimary;
-  if (isPrimary) textColor = Colors.navy;
+  if (isPrimary) textColor = Colors.bg;
   if (isGhost) textColor = Colors.gold;
-  if (isSuccess) textColor = Colors.navy;
+  if (isSuccess) textColor = Colors.bg;
   if (isError) textColor = Colors.white;
 
   return (
@@ -118,20 +118,20 @@ const styles = StyleSheet.create({
   secondary: {
     backgroundColor: Colors.white,
     borderWidth: 1.5,
-    borderColor: Colors.gold,
+    borderColor: Colors.b2,
     ...Shadows.sm,
   },
   ghost: {
     backgroundColor: "transparent",
     borderWidth: 1,
-    borderColor: Colors.gold,
+    borderColor: Colors.goldDim,
   },
   success: {
-    backgroundColor: Colors.success,
+    backgroundColor: Colors.teal,
     ...Shadows.md,
   },
   error: {
-    backgroundColor: Colors.error,
+    backgroundColor: Colors.red,
     ...Shadows.md,
   },
   pressed: {

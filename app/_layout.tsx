@@ -2,6 +2,9 @@ import { useEffect } from "react";
 import { View, Text, Button, LogBox } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { useFonts } from "expo-font";
+import { DMSans_400Regular, DMSans_500Medium } from "@expo-google-fonts/dm-sans";
+import { DMMono_400Regular, DMMono_500Medium } from "@expo-google-fonts/dm-mono";
+import { InstrumentSerif_400Regular_Italic } from "@expo-google-fonts/instrument-serif";
 import * as SplashScreen from "expo-splash-screen";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -33,7 +36,7 @@ if (__DEV__) {
 
 function ErrorFallback({ error, resetErrorBoundary }: FallbackProps) {
   return (
-    <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 20, backgroundColor: Colors.surface }}>
+    <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 20, backgroundColor: Colors.bg }}>
       <Text style={{ fontSize: 20, marginBottom: 10, color: Colors.textPrimary, fontFamily: Typography.fontFamily.display }}>
         Something went wrong
       </Text>
@@ -83,7 +86,13 @@ function RootLayoutNav() {
 }
 
 export default function RootLayout() {
-  const [fontsLoaded] = useFonts({});
+  const [fontsLoaded] = useFonts({
+    DMSans_400Regular,
+    DMSans_500Medium,
+    DMMono_400Regular,
+    DMMono_500Medium,
+    InstrumentSerif_400Regular_Italic,
+  });
 
   useEffect(() => {
     if (fontsLoaded) {

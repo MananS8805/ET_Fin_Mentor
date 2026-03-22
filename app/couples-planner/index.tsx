@@ -125,7 +125,7 @@ export default function CouplesPlannerScreen() {
     <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color="#FFF" />
+          <Ionicons name="arrow-back" size={24} color={Colors.t0} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Couple's Planner</Text>
         <View style={styles.headerBadge}>
@@ -345,7 +345,7 @@ const styles = StyleSheet.create({
     maxHeight: "85%",
   },
   header: {
-    backgroundColor: "#0D1B35",
+    backgroundColor: Colors.bg,
     paddingTop: 60,
     paddingBottom: 20,
     paddingHorizontal: 20,
@@ -359,7 +359,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 22,
     fontFamily: Typography.fontFamily.display,
-    color: "#FFF",
+    color: Colors.t0,
   },
   headerBadge: {
     backgroundColor: Colors.gold,
@@ -402,14 +402,14 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     fontSize: 26,
-    fontFamily: Typography.fontFamily.displaySemiBold,
-    color: "#FFFFFF",
+    fontFamily: Typography.fontFamily.display,
+    color: Colors.t0,
     marginBottom: 10,
   },
   emptySubtitle: {
     fontSize: 15,
     fontFamily: Typography.fontFamily.body,
-    color: "rgba(255,255,255,0.5)",
+    color: Colors.t1,
     textAlign: "center",
     lineHeight: 22,
     marginBottom: 30,
@@ -432,14 +432,14 @@ const styles = StyleSheet.create({
   },
   featureTickCircle: {
     alignItems: "center",
-    backgroundColor: "rgba(29,158,117,0.15)",
+    backgroundColor: Colors.tealDim,
     borderRadius: Radius.full,
     height: 18,
     justifyContent: "center",
     width: 18,
   },
   featureTick: {
-    color: "#1D9E75",
+    color: Colors.teal,
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: 11,
     marginTop: -1,
@@ -456,22 +456,22 @@ const styles = StyleSheet.create({
   buttonText: {
     fontSize: 16,
     fontFamily: Typography.fontFamily.display,
-    color: Colors.navy,
+    color: Colors.bg,
     marginRight: 10,
   },
   sectionTitle: {
     fontSize: 18,
     fontFamily: Typography.fontFamily.display,
-    color: "#FFFFFF",
+    color: Colors.t0,
     marginBottom: 15,
   },
   aiCard: {
-    backgroundColor: "rgba(127,119,221,0.06)",
+    backgroundColor: Colors.purpleDim,
     borderRadius: 20,
     padding: 16,
     marginBottom: 20,
     borderWidth: 0.5,
-    borderColor: "rgba(127,119,221,0.2)",
+    borderColor: "rgba(133,114,224,0.20)",
   },
   aiHeader: {
     flexDirection: "row",
@@ -481,14 +481,14 @@ const styles = StyleSheet.create({
   aiLabel: {
     fontSize: 12,
     fontFamily: Typography.fontFamily.display,
-    color: "#7F77DD",
+    color: Colors.purple,
     marginLeft: 8,
     letterSpacing: 1,
   },
   aiText: {
     fontSize: 15,
     fontFamily: Typography.fontFamily.body,
-    color: "rgba(255,255,255,0.8)",
+    color: Colors.t1,
     lineHeight: 22,
   },
   grid: {
@@ -498,8 +498,10 @@ const styles = StyleSheet.create({
   },
   scoreCard: {
     width: "100%",
-    backgroundColor: "#0D1B35",
+    backgroundColor: Colors.s1,
     padding: 20,
+    borderWidth: 0.5,
+    borderColor: Colors.b1,
     borderRadius: 24,
     marginBottom: 15,
     alignItems: "center",
@@ -507,37 +509,37 @@ const styles = StyleSheet.create({
   scoreLabel: {
     fontSize: 12,
     fontFamily: Typography.fontFamily.bodyMedium,
-    color: "rgba(255,255,255,0.4)",
+    color: Colors.t2,
     marginBottom: Spacing.xs,
     letterSpacing: 0.8,
     textTransform: "uppercase",
   },
   scoreValue: {
     fontSize: 34,
-    fontFamily: Typography.fontFamily.displaySemiBold,
+    fontFamily: Typography.fontFamily.numeric,
     color: Colors.gold,
   },
   optCard: {
     width: "48%",
-    backgroundColor: "#1A1A1A",
+    backgroundColor: Colors.s1,
     borderRadius: 16,
     padding: Spacing.lg,
     marginBottom: Spacing.md,
     borderWidth: 0.5,
-    borderColor: "#2A2A2A",
+    borderColor: Colors.b0,
   },
   optTitle: {
     fontSize: 11,
     fontFamily: Typography.fontFamily.bodyMedium,
-    color: "rgba(255,255,255,0.4)",
+    color: Colors.t2,
     letterSpacing: 0.8,
     textTransform: "uppercase",
     marginBottom: Spacing.sm,
   },
   optHighlight: {
     fontSize: 18,
-    fontFamily: Typography.fontFamily.displaySemiBold,
-    color: "#FFFFFF",
+    fontFamily: Typography.fontFamily.numeric,
+    color: Colors.t0,
     marginBottom: Spacing.xs,
   },
   optSub: {
@@ -546,22 +548,22 @@ const styles = StyleSheet.create({
     color: Colors.teal,
   },
   sipCard: {
-  backgroundColor: Colors.card,
+    backgroundColor: Colors.s1,
   borderRadius: Radius.lg,
   padding: Spacing.xl,
   borderWidth: 0.5,
-  borderColor: Colors.border,
+    borderColor: Colors.b1,
   gap: Spacing.md,
 },
 sipTitle: {
   fontSize: 16,
   fontFamily: Typography.fontFamily.display,
-  color: Colors.navy,
+    color: Colors.t0,
 },
 sipReason: {
   fontSize: 13,
   fontFamily: Typography.fontFamily.body,
-  color: Colors.textSecondary,
+    color: Colors.t1,
   lineHeight: 20,
 },
 sipRow: {
@@ -577,42 +579,42 @@ sipCol: {
 sipDivider: {
   width: 0.5,
   height: 40,
-  backgroundColor: Colors.border,
+  backgroundColor: Colors.b1,
 },
 sipName: {
   fontSize: 13,
   fontFamily: Typography.fontFamily.bodyMedium,
-  color: Colors.textSecondary,
+  color: Colors.t2,
 },
 sipAmount: {
   fontSize: 18,
-  fontFamily: Typography.fontFamily.display,
-  color: Colors.navy,
+  fontFamily: Typography.fontFamily.numeric,
+  color: Colors.t0,
 },
 insuranceCard: {
-  backgroundColor: "#F0FDF4",
+  backgroundColor: Colors.tealDim,
   borderRadius: 16,
   padding: 20,
   borderWidth: 0.5,
-  borderColor: "#86EFAC",
+  borderColor: "rgba(31,190,114,0.20)",
   gap: 8,
 },
 insuranceTitle: {
   fontSize: 14,
   fontFamily: Typography.fontFamily.display,
-  color: Colors.navy,
+  color: Colors.t2,
   textTransform: "uppercase",
   letterSpacing: 1,
 },
 insuranceType: {
   fontSize: 18,
-  fontFamily: Typography.fontFamily.display,
-  color: Colors.navy,
+  fontFamily: Typography.fontFamily.bodyMedium,
+  color: Colors.t0,
 },
 insuranceReason: {
   fontSize: 13,
   fontFamily: Typography.fontFamily.body,
-  color: Colors.textSecondary,
+  color: Colors.t1,
   lineHeight: 20,
 },
 insuranceAction: {

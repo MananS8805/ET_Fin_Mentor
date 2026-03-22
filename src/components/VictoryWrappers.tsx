@@ -1,13 +1,8 @@
 /**
  * Victory Chart Wrapper Components
  * 
- * These wrappers suppress defaultProps warnings in victory-native by using memo
- * and property redirection. React warns about defaultProps in function components,
- * but we can suppress this by memoizing and avoiding direct prop spreading of the
- * underlying component's defaultProps.
- * 
- * Usage: Import and use VictoryAxisWrapper, VictoryBarWrapper, etc. instead of
- * the raw Victory components from victory-native.
+ * Thin pass-through wrappers that suppress defaultProps warnings
+ * without using React.memo (which breaks Victory's internal prop detection).
  */
 
 import React from "react";
@@ -18,46 +13,18 @@ import {
   VictoryArea as BaseVictoryArea,
 } from "victory-native";
 
-// ─────────────────────────────────────────────────────────────────────────
-// VictoryAxisWrapper - Suppresses defaultProps warning by using memo
-// ─────────────────────────────────────────────────────────────────────────
-const VictoryAxisComponent = React.forwardRef<any, any>((props, ref) => (
-  <BaseVictoryAxis ref={ref} {...props} />
-));
-VictoryAxisComponent.displayName = "VictoryAxisComponent";
+export function VictoryAxisWrapper(props: React.ComponentProps<typeof BaseVictoryAxis>) {
+  return <BaseVictoryAxis {...props} />;
+}
 
-export const VictoryAxisWrapper = React.memo(VictoryAxisComponent);
-VictoryAxisWrapper.displayName = "VictoryAxisWrapper";
+export function VictoryBarWrapper(props: React.ComponentProps<typeof BaseVictoryBar>) {
+  return <BaseVictoryBar {...props} />;
+}
 
-// ─────────────────────────────────────────────────────────────────────────
-// VictoryBarWrapper - Suppresses defaultProps warning by using memo
-// ─────────────────────────────────────────────────────────────────────────
-const VictoryBarComponent = React.forwardRef<any, any>((props, ref) => (
-  <BaseVictoryBar ref={ref} {...props} />
-));
-VictoryBarComponent.displayName = "VictoryBarComponent";
+export function VictoryLineWrapper(props: React.ComponentProps<typeof BaseVictoryLine>) {
+  return <BaseVictoryLine {...props} />;
+}
 
-export const VictoryBarWrapper = React.memo(VictoryBarComponent);
-VictoryBarWrapper.displayName = "VictoryBarWrapper";
-
-// ─────────────────────────────────────────────────────────────────────────
-// VictoryLineWrapper - Suppresses defaultProps warning by using memo
-// ─────────────────────────────────────────────────────────────────────────
-const VictoryLineComponent = React.forwardRef<any, any>((props, ref) => (
-  <BaseVictoryLine ref={ref} {...props} />
-));
-VictoryLineComponent.displayName = "VictoryLineComponent";
-
-export const VictoryLineWrapper = React.memo(VictoryLineComponent);
-VictoryLineWrapper.displayName = "VictoryLineWrapper";
-
-// ─────────────────────────────────────────────────────────────────────────
-// VictoryAreaWrapper - Suppresses defaultProps warning by using memo
-// ─────────────────────────────────────────────────────────────────────────
-const VictoryAreaComponent = React.forwardRef<any, any>((props, ref) => (
-  <BaseVictoryArea ref={ref} {...props} />
-));
-VictoryAreaComponent.displayName = "VictoryAreaComponent";
-
-export const VictoryAreaWrapper = React.memo(VictoryAreaComponent);
-VictoryAreaWrapper.displayName = "VictoryAreaWrapper";
+export function VictoryAreaWrapper(props: React.ComponentProps<typeof BaseVictoryArea>) {
+  return <BaseVictoryArea {...props} />;
+}

@@ -36,17 +36,7 @@ import { Colors, Radius, Spacing, Typography } from "../../src/core/theme";
 
 type ScoreBarProps = {
   item: HealthDimensionDetail & { index: number };
-  color: string;
   helper: string;
-};
-
-const DIMENSION_COLORS: Record<HealthDimensionDetail["key"], string> = {
-  emergency: "#1D9E75",
-  insurance: "#D4AF37",
-  investment: "#7F77DD",
-  debt: "#E24B4A",
-  tax: "#378ADD",
-  retirement: "#2E5B9A",
 };
 
 const DIMENSION_HELPERS: Record<HealthDimensionDetail["key"], string> = {
@@ -60,19 +50,19 @@ const DIMENSION_HELPERS: Record<HealthDimensionDetail["key"], string> = {
 
 const CATEGORY_META = {
   Critical: {
-    color: "#E24B4A",
+    color: Colors.red,
     description: "Your plan needs immediate attention in a few core areas.",
   },
   "Needs Work": {
-    color: "#D4AF37",
+    color: Colors.amber,
     description: "A few smart adjustments can lift your score quickly.",
   },
   Good: {
-    color: "#1D9E75",
+    color: Colors.teal,
     description: "You have a solid base and can now optimize systematically.",
   },
   Excellent: {
-    color: "#7F77DD",
+    color: Colors.purple,
     description: "You are operating from a strong financial position.",
   },
 } as const;
@@ -85,9 +75,16 @@ function colorWithOpacity(hex: string, opacity: number) {
   return `rgba(${r},${g},${b},${opacity})`;
 }
 
-function ScoreBar({ item, color, helper }: ScoreBarProps) {
+function dimensionScoreColor(score: number) {
+  if (score >= 75) return Colors.teal;
+  if (score >= 50) return Colors.amber;
+  return Colors.red;
+}
+
+function ScoreBar({ item, helper }: ScoreBarProps) {
   const progress = useSharedValue(0);
   const targetWidth = Math.max(4, item.score);
+  const color = dimensionScoreColor(item.score);
 
   useEffect(() => {
     progress.value = 0;
@@ -358,7 +355,7 @@ export default function HealthScoreScreen() {
               <VictoryLineWrapper
                 data={scoreHistoryData}
                 interpolation="monotoneX"
-                style={{ data: { stroke: "#D4AF37", strokeWidth: 2.5 } }}
+                style={{ data: { stroke: Colors.gold, strokeWidth: 2.5 } }}
               />
               {lastHistoryPoint ? (
                 <VictoryScatter
@@ -371,7 +368,7 @@ export default function HealthScoreScreen() {
                 <VictoryScatter
                   data={[lastHistoryPoint]}
                   size={3.5}
-                  style={{ data: { fill: "#D4AF37" } }}
+                  style={{ data: { fill: Colors.gold } }}
                 />
               ) : null}
             </VictoryChart>
@@ -384,7 +381,6 @@ export default function HealthScoreScreen() {
           {dimensions.map((item, index) => (
             <ScoreBar
               key={item.key}
-              color={DIMENSION_COLORS[item.key]}
               helper={DIMENSION_HELPERS[item.key]}
               item={{ ...item, index }}
             />
@@ -495,8 +491,8 @@ const styles = StyleSheet.create({
   },
   ringCard: {
     alignItems: "center",
-    backgroundColor: "#1A1A1A",
-    borderColor: "#2A2A2A",
+    backgroundColor: Colors.s1,
+    borderColor: Colors.b1,
     borderRadius: 24,
     borderWidth: 0.5,
     gap: Spacing.lg,
@@ -504,8 +500,8 @@ const styles = StyleSheet.create({
     padding: Spacing.xl,
   },
   ringValue: {
-    color: "#FFFFFF",
-    fontFamily: Typography.fontFamily.displaySemiBold,
+    color: Colors.t0,
+    fontFamily: Typography.fontFamily.numeric,
     fontSize: 56,
   },
   ringLabel: {
@@ -523,7 +519,7 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.xs,
   },
   categoryDescription: {
-    color: "rgba(255,255,255,0.55)",
+    color: Colors.t1,
     fontFamily: Typography.fontFamily.body,
     fontSize: 14,
     lineHeight: 22,
@@ -547,10 +543,10 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
   },
   dimensionCard: {
-    backgroundColor: "#1A1A1A",
+    backgroundColor: Colors.s1,
     borderRadius: 16,
     borderWidth: 0.5,
-    borderColor: "#2A2A2A",
+    borderColor: Colors.b0,
     padding: Spacing.lg,
     gap: Spacing.sm,
   },
@@ -560,13 +556,13 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   dimensionLabel: {
-    color: Colors.textPrimary,
+    color: Colors.t0,
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.md,
   },
   dimensionValue: {
-    color: "rgba(255,255,255,0.85)",
-    fontFamily: Typography.fontFamily.displaySemiBold,
+    color: Colors.t0,
+    fontFamily: Typography.fontFamily.numeric,
     fontSize: Typography.size.md,
   },
   dimensionHelper: {
@@ -575,7 +571,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   barTrack: {
-    backgroundColor: "rgba(255,255,255,0.06)",
+    backgroundColor: Colors.s3,
     borderRadius: Radius.full,
     height: 8,
     overflow: "hidden",
@@ -588,21 +584,23 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
   },
   tipCard: {
-    backgroundColor: "#1A1A1A",
+    backgroundColor: Colors.s1,
     borderRadius: 16,
     borderWidth: 0.5,
-    borderColor: "#2A2A2A",
+    borderColor: Colors.b0,
+    borderLeftWidth: 2,
+    borderLeftColor: Colors.gold,
     flexDirection: "row",
     gap: Spacing.md,
     padding: Spacing.lg,
   },
   tipIndex: {
-    color: "#D4AF37",
-    fontFamily: Typography.fontFamily.displaySemiBold,
+    color: Colors.gold,
+    fontFamily: Typography.fontFamily.numeric,
     fontSize: 20,
   },
   tipText: {
-    color: "rgba(255,255,255,0.8)",
+    color: Colors.t1,
     flex: 1,
     fontFamily: Typography.fontFamily.body,
     fontSize: 14,
@@ -641,7 +639,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
   },
   refreshGhostText: {
-    color: "#D4AF37",
+    color: Colors.gold,
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: 12,
   },
@@ -651,15 +649,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   shareCard: {
-    backgroundColor: "#0D1B35",
+    backgroundColor: Colors.s1,
     borderRadius: 20,
     borderWidth: 0.5,
-    borderColor: "rgba(255,255,255,0.06)",
+    borderColor: Colors.b1,
     gap: Spacing.md,
     padding: Spacing.xl,
   },
   shareBody: {
-    color: "rgba(255,255,255,0.85)",
+    color: Colors.t1,
     fontFamily: Typography.fontFamily.body,
     fontSize: Typography.size.sm,
     lineHeight: 22,
@@ -668,8 +666,8 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   shareTitle: {
-    color: "#FFFFFF",
-    fontFamily: Typography.fontFamily.displaySemiBold,
+    color: Colors.t0,
+    fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: 16,
   },
   shareInsightRow: {
@@ -678,14 +676,14 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   checkDot: {
-    backgroundColor: "#1D9E75",
+    backgroundColor: Colors.teal,
     borderRadius: Radius.full,
     height: 7,
     marginTop: 1,
     width: 7,
   },
   shareInsightText: {
-    color: "#FFFFFF",
+    color: Colors.t0,
     flex: 1,
     fontFamily: Typography.fontFamily.body,
     fontSize: Typography.size.sm,
@@ -754,10 +752,10 @@ const styles = StyleSheet.create({
     lineHeight: 24,
   },
   chartCard: {
-    backgroundColor: "#1A1A1A",
+    backgroundColor: Colors.s1,
     borderRadius: 20,
     borderWidth: 0.5,
-    borderColor: "#2A2A2A",
+    borderColor: Colors.b0,
     overflow: "hidden",
     paddingVertical: Spacing.sm,
   },

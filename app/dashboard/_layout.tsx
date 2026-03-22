@@ -28,131 +28,99 @@ type ItemLayout = {
   y: number;
 };
 
-function LivingTabBar({ state, descriptors, navigation, insets, isWideLayout }: BottomTabBarProps & { isWideLayout: boolean }) {
+function FloatingTabBar({ state, descriptors, navigation, insets }: BottomTabBarProps & { insets: ReturnType<typeof useSafeAreaInsets> }) {
   const [layouts, setLayouts] = useState<Record<string, ItemLayout>>({});
   const blobX = useSharedValue(0);
-  const blobY = useSharedValue(0);
-
+  const blobW = useSharedValue(54);
+ 
   const activeRouteKey = state.routes[state.index]?.key;
-  const activeLayout = activeRouteKey ? layouts[activeRouteKey] : undefined;
-
+  const activeLayout   = activeRouteKey ? layouts[activeRouteKey] : undefined;
+ 
   useEffect(() => {
     if (!activeLayout) return;
-    blobX.value = withSpring(activeLayout.x, { damping: 16, stiffness: 180, mass: 0.55 });
-    blobY.value = withSpring(activeLayout.y, { damping: 16, stiffness: 180, mass: 0.55 });
-  }, [activeLayout, blobX, blobY]);
-
+    blobX.value = withSpring(activeLayout.x, { damping: 18, stiffness: 200, mass: 0.6 });
+    blobW.value = withSpring(activeLayout.w, { damping: 18, stiffness: 200, mass: 0.6 });
+  }, [activeLayout, blobX, blobW]);
+ 
   const blobStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: blobX.value }, { translateY: blobY.value }],
+    transform: [{ translateX: blobX.value }],
+    width: blobW.value,
   }));
-
-  const containerStyle = useMemo(
-    () => [
-      styles.tabShell,
-      isWideLayout
-        ? {
-            bottom: 20,
-            left: 14,
-            paddingHorizontal: 8,
-            paddingVertical: 10,
-            top: 82,
-            width: 80,
-          }
-        : {
-            bottom: 10 + insets.bottom,
-            left: 16,
-            paddingHorizontal: 10,
-            paddingVertical: 10,
-            right: 16,
-          },
-    ],
-    [insets.bottom, isWideLayout]
-  );
-
+ 
   return (
-    <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
-      <View style={containerStyle}>
-        <LinearGradient
-          colors={["rgba(12,18,30,0.96)", "rgba(20,31,46,0.94)", "rgba(16,24,36,0.95)"]}
-          end={{ x: 1, y: 1 }}
-          start={{ x: 0, y: 0 }}
-          style={StyleSheet.absoluteFillObject}
-        />
-
-        {activeLayout ? (
-          <Animated.View
-            style={[
-              styles.blob,
-              {
-                height: activeLayout.h,
-                width: activeLayout.w,
-              },
-              blobStyle,
-            ]}
-          />
-        ) : null}
-
-        <View style={[styles.tabItems, isWideLayout ? styles.tabItemsVertical : styles.tabItemsHorizontal]}>
-          {state.routes.map((route, index) => {
-            const meta = TAB_META[route.name as TabRouteName];
-            const isFocused = state.index === index;
-
-            const onPress = () => {
-              const event = navigation.emit({
-                canPreventDefault: true,
-                target: route.key,
-                type: "tabPress",
-              });
-
-              if (!isFocused && !event.defaultPrevented) {
-                navigation.navigate(route.name, route.params);
-              }
-            };
-
-            const onLongPress = () => {
-              navigation.emit({
-                target: route.key,
-                type: "tabLongPress",
-              });
-            };
-
-            return (
-              <Pressable
-                accessibilityLabel={descriptors[route.key].options.tabBarAccessibilityLabel}
-                accessibilityRole="button"
-                accessibilityState={isFocused ? { selected: true } : {}}
-                key={route.key}
-                onLayout={(event) => {
-                  const { height, width, x, y } = event.nativeEvent.layout;
-                  setLayouts((prev) => {
-                    const previous = prev[route.key];
-                    if (
-                      previous &&
-                      previous.x === x &&
-                      previous.y === y &&
-                      previous.w === width &&
-                      previous.h === height
-                    ) {
-                      return prev;
-                    }
-                    return { ...prev, [route.key]: { h: height, w: width, x, y } };
-                  });
-                }}
-                onLongPress={onLongPress}
-                onPress={onPress}
-                style={styles.tabItem}
-              >
-                <Ionicons color={isFocused ? Colors.gold : "rgba(255,255,255,0.74)"} name={meta.icon} size={22} />
-                {!isWideLayout ? <Text style={[styles.tabLabel, isFocused ? styles.tabLabelActive : null]}>{meta.label}</Text> : null}
-              </Pressable>
-            );
-          })}
-        </View>
+    <View
+      pointerEvents="box-none"
+      style={[
+        styles.navShell,
+        { bottom: 12 + insets.bottom },
+      ]}
+    >
+      {/* dark frosted background */}
+      <LinearGradient
+        colors={["rgba(17,17,20,0.97)", "rgba(14,14,17,0.97)"]}
+        style={StyleSheet.absoluteFillObject}
+      />
+ 
+      {/* animated gold blob behind active tab */}
+      {activeLayout ? (
+        <Animated.View style={[styles.blob, blobStyle]} />
+      ) : null}
+ 
+      {/* tab items */}
+      <View style={styles.tabRow}>
+        {state.routes.map((route, index) => {
+          const meta      = TAB_META[route.name as TabRouteName];
+          const isFocused = state.index === index;
+ 
+          const onPress = () => {
+            const event = navigation.emit({
+              canPreventDefault: true,
+              target: route.key,
+              type: "tabPress",
+            });
+            if (!isFocused && !event.defaultPrevented) {
+              navigation.navigate(route.name, route.params);
+            }
+          };
+ 
+          const onLongPress = () => {
+            navigation.emit({ target: route.key, type: "tabLongPress" });
+          };
+ 
+          return (
+            <Pressable
+              accessibilityLabel={descriptors[route.key].options.tabBarAccessibilityLabel}
+              accessibilityRole="button"
+              accessibilityState={isFocused ? { selected: true } : {}}
+              key={route.key}
+              onLayout={(e) => {
+                const { height, width, x, y } = e.nativeEvent.layout;
+                setLayouts((prev) => {
+                  const p = prev[route.key];
+                  if (p && p.x === x && p.y === y && p.w === width && p.h === height) return prev;
+                  return { ...prev, [route.key]: { h: height, w: width, x, y } };
+                });
+              }}
+              onLongPress={onLongPress}
+              onPress={onPress}
+              style={styles.tabItem}
+            >
+              <Ionicons
+                name={meta.icon}
+                size={20}
+                color={isFocused ? Colors.gold : Colors.t2}
+              />
+              <Text style={[styles.tabLabel, isFocused ? styles.tabLabelActive : styles.tabLabelInactive]}>
+                {meta.label}
+              </Text>
+            </Pressable>
+          );
+        })}
       </View>
     </View>
   );
 }
-
+ 
 export default function DashboardLayout() {
   const demoMode = useAppStore((state) => state.demoMode);
   const { width } = useWindowDimensions();
@@ -168,6 +136,7 @@ export default function DashboardLayout() {
           headerRight: () => (demoMode ? <DemoBadge /> : null),
           headerStyle: { backgroundColor: Colors.navy },
           headerTintColor: Colors.white,
+          headerShown:false,
           headerTitleStyle: {
             fontFamily: Typography.fontFamily.display,
             fontSize: Typography.size.lg,
@@ -181,7 +150,7 @@ export default function DashboardLayout() {
           title: meta.title,
         };
       }}
-      tabBar={(props) => <LivingTabBar {...props} insets={insets} isWideLayout={isWideLayout} />}
+      tabBar={(props) => <FloatingTabBar {...props} insets={insets} />}
     >
       <Tabs.Screen name="index" />
       <Tabs.Screen name="chat" />
@@ -193,59 +162,69 @@ export default function DashboardLayout() {
 }
 
 const styles = StyleSheet.create({
-  tabShell: {
-    backgroundColor: "transparent",
-    borderColor: "rgba(255,255,255,0.14)",
-    borderRadius: 24,
-    borderWidth: 0.8,
-    overflow: "hidden",
-    position: "absolute",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.22,
-    shadowRadius: 16,
+  navShell: {
+    position:     "absolute",
+    left:         16,
+    right:        16,
+    borderRadius: 26,
+    borderWidth:  0.5,
+    borderColor:  Colors.b1,
+    overflow:     "hidden",
+    // shadow
+    shadowColor:   "#000",
+    shadowOffset:  { width: 0, height: 8 },
+    shadowOpacity: 0.35,
+    shadowRadius:  20,
+    elevation:     12,
   },
-  tabItems: {
-    position: "relative",
+ 
+  blob: {
+    position:      "absolute",
+    top:           6,
+    height:        46,
+    borderRadius:  20,
+    backgroundColor: Colors.goldDim,
+    borderWidth:   0.5,
+    borderColor:   "rgba(200,168,75,0.35)",
+    // gold glow on iOS
+    shadowColor:   Colors.gold,
+    shadowOffset:  { width: 0, height: 2 },
+    shadowOpacity: 0.20,
+    shadowRadius:  8,
+    zIndex:        1,
+  },
+ 
+  tabRow: {
+    flexDirection:  "row",
+    justifyContent: "space-between",
+    paddingHorizontal: 8,
+    paddingVertical:   8,
     zIndex: 2,
   },
-  tabItemsHorizontal: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  tabItemsVertical: {
-    alignItems: "center",
-    gap: 8,
-  },
-  blob: {
-    backgroundColor: "rgba(212,175,55,0.16)",
-    borderColor: "rgba(212,175,55,0.48)",
-    borderRadius: 16,
-    borderWidth: 0.8,
-    position: "absolute",
-    shadowColor: "#D4AF37",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.28,
-    shadowRadius: 10,
-    zIndex: 1,
-  },
+ 
   tabItem: {
-    alignItems: "center",
-    borderRadius: 16,
-    gap: 4,
+    flex:           1,
+    alignItems:     "center",
     justifyContent: "center",
-    minHeight: 54,
-    minWidth: 54,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    gap:            3,
+    minHeight:      46,
+    borderRadius:   18,
+    paddingVertical: 6,
+    zIndex: 2,
   },
+ 
   tabLabel: {
-    color: "rgba(255,255,255,0.66)",
-    fontFamily: Typography.fontFamily.body,
-    fontSize: 10,
+    fontSize:      9,
+    fontFamily:    Typography.fontFamily.bodyMedium,
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
   },
+ 
   tabLabelActive: {
     color: Colors.gold,
-    fontFamily: Typography.fontFamily.bodyMedium,
+  },
+ 
+  tabLabelInactive: {
+    color: Colors.t3,
   },
 });

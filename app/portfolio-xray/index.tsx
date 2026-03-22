@@ -1,11 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Image, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from "react-native";
+import {
+  ActivityIndicator,
+  Alert,
+  Image,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
 import * as Animatable from "react-native-animatable";
 import * as Sharing from "expo-sharing";
 import ViewShot from "react-native-view-shot";
-import { VictoryPie } from "victory-native";
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -13,10 +22,11 @@ import Animated, {
   withDelay,
   withTiming,
 } from "react-native-reanimated";
-import { ProfileService } from "../../src/core/services/ProfileService";
+
 import { Button } from "../../src/components/Button";
 import { Screen } from "../../src/components/Screen";
 import { AuthService } from "../../src/core/services/AuthService";
+import { ProfileService } from "../../src/core/services/ProfileService";
 import {
   MFHolding,
   OverlapPair,
@@ -28,1026 +38,678 @@ import {
   getOverlapPairs,
 } from "../../src/core/models/UserProfile";
 import { CAMSParseResult, GeminiService } from "../../src/core/services/GeminiService";
-import {
-  calculateMetrics,
-  PortfolioMetrics,
-  Fund,
-  Transaction,
-} from "../../src/core/services/MutualFundService";
 import { useAppStore } from "../../src/core/services/store";
-import { Colors, Radius, Spacing, Typography } from "../../src/core/theme";
-import { AtAGlanceHeader } from "./components/AtAGlanceHeader";
-import { FundPerformanceTable } from "./components/FundPerformanceTable";
-import { SmartRecommendationPanel } from "./components/SmartRecommendationPanel";
-import { SchemeInputForm } from "./components/SchemeInputForm";
-import { HoldingEditModal } from "./components/HoldingEditModal";
+import { Colors, Radius, Shadows, Spacing, Typography } from "../../src/core/theme";
 
-// ─── helpers ────────────────────────────────────────────────────────────────
+import { HoldingEditModal } from "./components/HoldingEditModal";
+import { SchemeInputForm } from "./components/SchemeInputForm";
+
+// ─── helpers ─────────────────────────────────────────────────────────────────
 
 function xirrColor(xirr: number | null): string {
-  if (xirr === null) return Colors.textMuted;
+  if (xirr === null) return Colors.t2;
   if (xirr >= 12) return Colors.teal;
-  if (xirr >= 8) return Colors.gold;
+  if (xirr >= 8)  return Colors.amber;
   return Colors.red;
 }
 
 function xirrLabel(xirr: number | null): string {
-  if (xirr === null) return "Insufficient data";
-  return `${xirr.toFixed(1)}% XIRR`;
+  if (xirr === null) return "N/A";
+  return xirr.toFixed(1) + "% XIRR";
+}
+
+function categoryColor(cat: MFHolding["category"]): string {
+  const map: Record<MFHolding["category"], string> = {
+    large_cap: Colors.teal,
+    mid_cap:   Colors.gold,
+    small_cap: Colors.red,
+    elss:      Colors.purple,
+    debt:      Colors.t3,
+    hybrid:    Colors.amber,
+    liquid:    Colors.blue,
+    other:     Colors.t2,
+  };
+  return map[cat] ?? Colors.t2;
 }
 
 const CATEGORY_LABELS: Record<MFHolding["category"], string> = {
   large_cap: "Large cap",
-  mid_cap: "Mid cap",
+  mid_cap:   "Mid cap",
   small_cap: "Small cap",
-  elss: "ELSS",
-  debt: "Debt",
-  hybrid: "Hybrid",
-  liquid: "Liquid",
-  other: "Other",
+  elss:      "ELSS",
+  debt:      "Debt",
+  hybrid:    "Hybrid",
+  liquid:    "Liquid",
+  other:     "Other",
 };
 
-const PIE_COLORS = [
-  Colors.navy,
-  Colors.teal,
-  Colors.gold,
-  Colors.purple,
-  Colors.red,
-  "#2E5B9A",
-  "#1D9E75",
-  "#888",
-];
+// ─── build xray ───────────────────────────────────────────────────────────────
 
-const CATEGORY_THEME: Record<MFHolding["category"], string> = {
-  large_cap: "#378ADD",
-  mid_cap: "#1D9E75",
-  small_cap: "#E24B4A",
-  elss: "#7F77DD",
-  debt: "#2E5B9A",
-  hybrid: "#D4AF37",
-  liquid: "#1D9E75",
-  other: "#888888",
-};
-
-// Build a PortfolioXRay from an array of MFHolding — pure, offline
 function buildXRay(holdings: MFHolding[]): PortfolioXRay {
-  const totalValue = holdings.reduce((s, h) => s + h.currentValue, 0);
+  const totalValue    = holdings.reduce((s, h) => s + h.currentValue, 0);
   const totalInvested = holdings.reduce((s, h) => s + h.purchaseValue, 0);
 
-  // Collect all actual transactions from holdings
   const allCashflows: Array<{ date: Date; amount: number }> = [];
-  
-  holdings.forEach(h => {
-    // Assuming transactions are part of the MFHolding type, which they should be
-    // This part of the schema might need to be adjusted if not.
-    // For now, let's assume `h.transactions` exists and is an array of { date: Date; amount: number }
+  holdings.forEach((h) => {
     if (h.transactions && h.transactions.length > 0) {
-      h.transactions.forEach(t => {
-        allCashflows.push({ date: new Date(t.date), amount: -t.amount }); // Negative for investments
+      h.transactions.forEach((t) => {
+        allCashflows.push({ date: new Date(t.date), amount: -Math.abs(t.amount) });
       });
-    } else {
-      // Fallback: assume purchase was when purchaseValue was invested
-      // This is still an approximation but better than hardcoded 365 days
-      const estimatedDate = new Date(Date.now() - 180 * 24 * 3600 * 1000); // 6 months ago
-      allCashflows.push({ date: estimatedDate, amount: -h.purchaseValue });
+    } else if (h.purchaseDate) {
+      allCashflows.push({ date: new Date(h.purchaseDate), amount: -h.purchaseValue });
     }
   });
 
-  // Add current value as final positive cashflow
-  if (totalValue > 0) {
+  let overallXIRR: number | null = null;
+  if (allCashflows.length > 0 && totalValue > 0) {
     allCashflows.push({ date: new Date(), amount: totalValue });
+    overallXIRR = calculateXIRR(allCashflows);
   }
-
-  const overallXIRR = allCashflows.length >= 2 ? calculateXIRR(allCashflows) : null;
 
   return {
     holdings,
     totalValue,
     totalInvested,
     overallXIRR,
-    overlapPairs: getOverlapPairs(holdings),
-    expenseRatioDrag: getExpenseRatioDrag(holdings),
+    overlapPairs:       getOverlapPairs(holdings),
+    expenseRatioDrag:   getExpenseRatioDrag(holdings),
     categoryAllocation: getCategoryAllocation(holdings),
   };
 }
 
-// Map CAMSParseResult → MFHolding[]
 function mapCAMSToHoldings(result: CAMSParseResult): MFHolding[] {
   return result.holdings
     .filter((h) => h.name && h.currentValue > 0)
     .map((h, index) => {
-      // Create cashflows for XIRR: investments are negative
-      const cashflows = (h.transactions ?? [])
+      const cashflows: Array<{ date: Date; amount: number }> = (h.transactions ?? [])
         .filter((t) => t.date && t.amount !== undefined)
-        .map((t) => ({ date: new Date(t.date), amount: -t.amount })); // Note the negative sign
+        .map((t) => ({ date: new Date(t.date), amount: -Math.abs(t.amount) }));
 
-      // Add the current value as the final positive cashflow
-      cashflows.push({ date: new Date(), amount: h.currentValue });
+      if (cashflows.length > 0) cashflows.push({ date: new Date(), amount: h.currentValue });
 
       const xirr = cashflows.length >= 2 ? calculateXIRR(cashflows) : null;
 
-      const rawCategory = (h.category ?? "other").toLowerCase().replace(/\s+/g, "_");
-      const validCategories: MFHolding["category"][] = [
-        "large_cap", "mid_cap", "small_cap", "elss", "debt", "hybrid", "liquid", "other",
+      const raw = (h.category ?? "other").toLowerCase().replace(/\s+/g, "_");
+      const validCats: MFHolding["category"][] = [
+        "large_cap","mid_cap","small_cap","elss","debt","hybrid","liquid","other",
       ];
-      const category = validCategories.includes(rawCategory as MFHolding["category"])
-        ? (rawCategory as MFHolding["category"])
-        : "other";
+      const category = validCats.includes(raw as MFHolding["category"])
+        ? (raw as MFHolding["category"]) : "other";
 
       return {
-        id: `h-${index}`,
-        name: h.name,
+        id:            "h-" + index,
+        name:          h.name,
         category,
-        units: h.units ?? 0,
-        nav: h.nav ?? 0,
-        currentValue: h.currentValue,
+        units:         h.units ?? 0,
+        nav:           h.nav ?? 0,
+        currentValue:  h.currentValue,
         purchaseValue: h.purchaseValue ?? h.currentValue,
         xirr,
-        // Ensure transactions are carried over if they exist
-        transactions: (h.transactions ?? []).map(t => ({...t, date: new Date(t.date)}))
+        schemeCode:    undefined,
+        transactions:  (h.transactions ?? []).map((t) => ({ ...t, date: new Date(t.date) })),
       };
     });
 }
 
-// Fallback rebalancing text built purely from xray numbers
 function buildFallbackPlan(xray: PortfolioXRay): string {
   const lines: string[] = [];
 
   if (xray.overlapPairs.length > 0) {
     const pair = xray.overlapPairs[0];
-    lines.push(
-      `1. Consider consolidating ${pair.fund1} and ${pair.fund2} — ${pair.reason}`
-    );
+    lines.push("1. Consider consolidating " + pair.fund1 + " and " + pair.fund2 + " — " + pair.reason);
   } else {
     lines.push("1. No significant fund overlap detected in your current portfolio.");
   }
 
   if (xray.expenseRatioDrag > 0) {
-    lines.push(
-      `2. Your portfolio costs roughly ${formatINR(xray.expenseRatioDrag)} more per year than an equivalent index fund — consider switching high-expense funds to direct plans or index alternatives.`
-    );
+    lines.push("2. Your portfolio costs roughly " + formatINR(xray.expenseRatioDrag) + " more per year than an equivalent index fund. Consider switching high-expense funds to direct plans.");
   } else {
     lines.push("2. Expense ratio drag is within acceptable range.");
   }
 
   const equityPct =
-    (xray.categoryAllocation.large_cap ?? 0) +
-    (xray.categoryAllocation.mid_cap ?? 0) +
-    (xray.categoryAllocation.small_cap ?? 0) +
-    (xray.categoryAllocation.elss ?? 0) +
+    (xray.categoryAllocation.large_cap ?? 0) + (xray.categoryAllocation.mid_cap ?? 0) +
+    (xray.categoryAllocation.small_cap ?? 0) + (xray.categoryAllocation.elss ?? 0) +
     (xray.categoryAllocation.hybrid ?? 0);
 
   if (equityPct > 90) {
-    lines.push(
-      "3. Portfolio is heavily equity-concentrated — consider adding a debt or liquid fund for stability as you approach your goals."
-    );
+    lines.push("3. Portfolio is heavily equity-concentrated. Consider adding a debt or liquid fund for stability.");
   } else if (equityPct < 40) {
-    lines.push(
-      "3. Equity allocation looks low for long-term wealth creation — review whether your goal horizon supports more equity exposure."
-    );
+    lines.push("3. Equity allocation looks low for long-term wealth creation. Review whether your goal horizon supports more equity.");
   } else {
-    lines.push(
-      `3. Equity allocation is ${equityPct.toFixed(0)}% — broadly reasonable. Review annually and rebalance if equity drifts more than 10% from your target.`
-    );
+    lines.push("3. Equity at " + equityPct.toFixed(0) + "% is broadly reasonable. Review annually.");
   }
 
   return lines.join("\n\n");
 }
 
-// ─── sub-components ──────────────────────────────────────────────────────────
+// ─── NAV refresh helper ───────────────────────────────────────────────────────
+
+async function fetchLatestNAV(schemeCode: string): Promise<{ nav: number; date: string } | null> {
+  try {
+    const controller = new AbortController();
+    const timeout    = setTimeout(() => controller.abort(), 6000);
+    const res        = await fetch("https://api.mfapi.in/mf/" + schemeCode, { signal: controller.signal });
+    clearTimeout(timeout);
+    if (!res.ok) return null;
+    const json = await res.json();
+    if (json.status !== "SUCCESS" || !json.data?.[0]) return null;
+    const nav = parseFloat(json.data[0].nav);
+    return isNaN(nav) ? null : { nav, date: json.data[0].date };
+  } catch {
+    return null;
+  }
+}
+
+// ─── sub-components ───────────────────────────────────────────────────────────
 
 function EmptyState() {
   return (
     <Screen scroll>
-      <View style={styles.hero}>
-        <Text style={styles.title}>Portfolio X-Ray</Text>
-        <Text style={styles.subtitle}>
-          Finish onboarding first so the X-Ray can align your risk profile and goals with the rebalancing plan.
+      <View style={styles.emptyHero}>
+        <Text style={styles.screenEyebrow}>Portfolio X-Ray</Text>
+        <Text style={styles.screenTitle}>Your funds, dissected</Text>
+        <Text style={styles.screenSubtitle}>
+          Upload a CAMS or KFintech statement, or add funds by scheme code to get your true XIRR, overlap analysis, expense drag, and rebalancing plan.
         </Text>
       </View>
       <View style={styles.card}>
         <Text style={styles.cardTitle}>X-Ray unlocks after profile setup</Text>
-        <Text style={styles.cardBody}>
-          We need your risk profile before we can generate a personalised rebalancing recommendation.
-        </Text>
-        <Button label="Go To Onboarding" onPress={() => router.push("/onboarding")} />
+        <Text style={styles.cardBody}>Complete your profile first so we can align your risk profile with the rebalancing plan.</Text>
+        <Button label="Go to onboarding" onPress={() => router.push("/onboarding")} />
       </View>
     </Screen>
   );
 }
 
-function HoldingCard({
-  holding,
-  onEdit,
-  index,
-}: {
-  holding: MFHolding;
-  onEdit?: () => void;
-  index: number;
-}) {
-  const color = xirrColor(holding.xirr);
-  const categoryColor = CATEGORY_THEME[holding.category] ?? "#888888";
-  const y = useSharedValue(16);
+function HoldingCard({ holding, index, onEdit }: { holding: MFHolding; index: number; onEdit: () => void }) {
+  const color   = categoryColor(holding.category);
+  const y       = useSharedValue(16);
   const opacity = useSharedValue(0);
 
   useEffect(() => {
-    y.value = withDelay(index * 40, withTiming(0, { duration: 320, easing: Easing.out(Easing.cubic) }));
-    opacity.value = withDelay(index * 40, withTiming(1, { duration: 320, easing: Easing.out(Easing.cubic) }));
+    y.value       = withDelay(index * 40, withTiming(0, { duration: 300, easing: Easing.out(Easing.cubic) }));
+    opacity.value = withDelay(index * 40, withTiming(1, { duration: 300, easing: Easing.out(Easing.cubic) }));
   }, [index, opacity, y]);
 
-  const itemAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: opacity.value,
-    transform: [{ translateY: y.value }],
+  const animStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value, transform: [{ translateY: y.value }],
   }));
 
+  const returnColor = holding.xirr === null ? Colors.t2 : holding.xirr >= 12 ? Colors.teal : holding.xirr >= 8 ? Colors.amber : Colors.red;
+
   return (
-    <Animated.View style={itemAnimatedStyle}>
-      <TouchableOpacity style={styles.holdingCard} onPress={onEdit} disabled={!onEdit}>
-      <View style={styles.holdingHeader}>
-        <View style={{ flex: 1 }}>
+    <Animated.View style={animStyle}>
+      <TouchableOpacity style={styles.holdingCard} onPress={onEdit} activeOpacity={0.7}>
+        <View style={[styles.holdingDot, { backgroundColor: color }]} />
+        <View style={styles.holdingBody}>
           <Text style={styles.holdingName} numberOfLines={2}>{holding.name}</Text>
-          <View
-            style={[
-              styles.categoryTag,
-              {
-                backgroundColor: `${categoryColor}1A`,
-                borderColor: `${categoryColor}55`,
-              },
-            ]}
-          >
-            <Text style={styles.categoryTagText}>{CATEGORY_LABELS[holding.category]}</Text>
+          <View style={styles.holdingMeta}>
+            <Text style={styles.holdingCat}>{CATEGORY_LABELS[holding.category]}</Text>
+            {holding.schemeCode ? (
+              <View style={styles.schemeBadge}>
+                <Text style={styles.schemeBadgeText}>{"#" + holding.schemeCode}</Text>
+              </View>
+            ) : null}
+            {holding.purchaseDate || (holding.transactions && holding.transactions.length > 0) ? (
+              <View style={styles.dateBadge}>
+                <Text style={styles.dateBadgeText}>Date known</Text>
+              </View>
+            ) : (
+              <View style={[styles.dateBadge, styles.dateBadgeWarn]}>
+                <Text style={[styles.dateBadgeText, { color: Colors.amber }]}>No purchase date</Text>
+              </View>
+            )}
           </View>
         </View>
-        {onEdit && (
-          <View style={styles.editBadge}>
-            <Text style={styles.editBadgeText}>✎ Edit</Text>
-          </View>
-        )}
-      </View>
-      <View style={styles.holdingMetaRow}>
-        <View>
-          <Text style={styles.metaLabel}>Current value</Text>
-          <Text style={styles.metaValue}>{formatINR(holding.currentValue)}</Text>
+        <View style={styles.holdingRight}>
+          <Text style={styles.holdingValue}>{formatINR(holding.currentValue)}</Text>
+          <Text style={[styles.holdingXirr, { color: returnColor }]}>{xirrLabel(holding.xirr)}</Text>
         </View>
-        <View style={{ alignItems: "flex-end" }}>
-          <Text style={styles.metaLabel}>Returns</Text>
-          <Text style={[styles.metaValue, styles.metaXirrValue, { color }]}>{xirrLabel(holding.xirr)}</Text>
-        </View>
-      </View>
       </TouchableOpacity>
     </Animated.View>
   );
 }
 
 function OverlapCard({ pair }: { pair: OverlapPair }) {
-  const isHigh = pair.overlapLevel === "high";
-  const borderColor = isHigh ? "rgba(226,75,74,0.2)" : "rgba(212,175,55,0.2)";
-  const labelColor = isHigh ? "#E24B4A" : "#D4AF37";
-  const bg = isHigh ? "rgba(226,75,74,0.06)" : "rgba(212,175,55,0.06)";
+  const isHigh      = pair.overlapLevel === "high";
+  const borderColor = isHigh ? "rgba(220,78,78,0.22)" : "rgba(217,142,56,0.22)";
+  const labelColor  = isHigh ? Colors.red : Colors.amber;
+  const bgColor     = isHigh ? Colors.redDim : Colors.amberDim;
+
   return (
-    <View style={[styles.overlapCard, { backgroundColor: bg, borderColor }]}>
-      <View style={[styles.overlapBadge, { backgroundColor: `${labelColor}1A`, borderColor: `${labelColor}66` }]}>
-        <Text style={[styles.overlapLevel, { color: labelColor }]}>{pair.overlapLevel.toUpperCase()}</Text>
+    <View style={[styles.overlapCard, { backgroundColor: bgColor, borderColor }]}>
+      <View style={styles.overlapHeader}>
+        <View style={[styles.overlapBadge, { backgroundColor: bgColor, borderColor }]}>
+          <Text style={[styles.overlapLevel, { color: labelColor }]}>{pair.overlapLevel.toUpperCase()}</Text>
+        </View>
+        <Text style={styles.overlapFunds} numberOfLines={1}>{pair.fund1 + " · " + pair.fund2}</Text>
       </View>
-      <Text style={styles.overlapFunds}>
-        {pair.fund1} &amp; {pair.fund2}
-      </Text>
       <Text style={styles.overlapReason}>{pair.reason}</Text>
     </View>
   );
 }
 
-// ─── main screen ─────────────────────────────────────────────────────────────
+// ─── main screen ──────────────────────────────────────────────────────────────
 
 export default function PortfolioXRayScreen() {
-  const profile = useAppStore((state) => state.currentProfile);
-  const setCurrentProfile = useAppStore((state) => state.setCurrentProfile);
-  const portfolioXRay = useAppStore((state) => state.portfolioXRay);
-  const setPortfolioXRay = useAppStore((state) => state.setPortfolioXRay);
-  const session = useAppStore((state) => state.session);
-  const shareCardRef = useRef<ViewShot | null>(null);
-  const { width } = useWindowDimensions();
+  const profile           = useAppStore((s) => s.currentProfile);
+  const setCurrentProfile = useAppStore((s) => s.setCurrentProfile);
+  const portfolioXRay     = useAppStore((s) => s.portfolioXRay);
+  const setPortfolioXRay  = useAppStore((s) => s.setPortfolioXRay);
+  const session           = useAppStore((s) => s.session);
+  const shareCardRef      = useRef<ViewShot | null>(null);
 
-  const [holdings, setHoldings] = useState<MFHolding[]>(portfolioXRay?.holdings ?? []);
-  const [parsing, setParsing] = useState(false);
-  const [parseNote, setParseNote] = useState("");
-  const [scanPreview, setScanPreview] = useState<string | null>(null);
-  const [plan, setPlan] = useState("");
-  const [planLoading, setPlanLoading] = useState(false);
-  const [planError, setPlanError] = useState("");
-  const [sharing, setSharing] = useState(false);
+  const [holdings,       setHoldings]      = useState<MFHolding[]>(portfolioXRay?.holdings ?? []);
+  const [parsing,        setParsing]        = useState(false);
+  const [parseNote,      setParseNote]      = useState("");
+  const [scanPreview,    setScanPreview]    = useState<string | null>(null);
+  const [plan,           setPlan]           = useState("");
+  const [planLoading,    setPlanLoading]    = useState(false);
+  const [planError,      setPlanError]      = useState("");
+  const [sharing,        setSharing]        = useState(false);
   const [editingHolding, setEditingHolding] = useState<MFHolding | null>(null);
-  const heroY = useSharedValue(30);
-  const heroOpacity = useSharedValue(0);
-  const planOpacity = useSharedValue(0);
+  const [showAddForm,    setShowAddForm]    = useState(false);
 
-  // New metrics state for MutualFundService
-  const [portfolioMetrics, setPortfolioMetrics] = useState<PortfolioMetrics | null>(null);
-  const [metricsLoading, setMetricsLoading] = useState(false);
-  const [fundMetrics, setFundMetrics] = useState<Array<{ fund: Fund; metrics: PortfolioMetrics }>>([]);
+  // NAV refresh
+  const [refreshing,    setRefreshing]    = useState(false);
+  const [refreshNote,   setRefreshNote]   = useState("");
+  const [lastRefreshed, setLastRefreshed] = useState<string | null>(null);
 
-  const xray = useMemo(() => buildXRay(holdings), [holdings]);
-  const fallbackPlan = useMemo(() => buildFallbackPlan(xray), [xray]);
-
-  // Pie chart data — filter out zero-allocation categories
-  const pieData = useMemo(() => {
-    return Object.entries(xray.categoryAllocation)
+  const xray           = useMemo(() => buildXRay(holdings), [holdings]);
+  const fallbackPlan   = useMemo(() => buildFallbackPlan(xray), [xray]);
+  const pieData        = useMemo(() =>
+    Object.entries(xray.categoryAllocation)
       .filter(([, pct]) => pct > 0)
-      .map(([cat, pct]) => ({
-        x: CATEGORY_LABELS[cat as MFHolding["category"]],
-        y: pct,
-      }));
-  }, [xray.categoryAllocation]);
-
-  const recommendationMetrics = useMemo(() => portfolioMetrics ? [portfolioMetrics] : [], [portfolioMetrics]);
-  const fundNamesList = useMemo(() => holdings.map((h) => h.name), [holdings]);
+      .map(([cat, pct]) => ({ cat: cat as MFHolding["category"], pct })),
+    [xray.categoryAllocation]);
+  const hasPortfolio     = holdings.length > 0;
+  const refreshableCount = holdings.filter((h) => !!h.schemeCode).length;
 
   useEffect(() => {
-    heroY.value = withTiming(0, { duration: 500, easing: Easing.out(Easing.cubic) });
-    heroOpacity.value = withTiming(1, { duration: 500, easing: Easing.out(Easing.cubic) });
-  }, [heroOpacity, heroY]);
-
-  useEffect(() => {
-    if (!planLoading && (plan || fallbackPlan)) {
-      planOpacity.value = 0;
-      planOpacity.value = withTiming(1, { duration: 500, easing: Easing.out(Easing.cubic) });
-    }
-  }, [fallbackPlan, plan, planLoading, planOpacity]);
-
-  const heroAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: heroOpacity.value,
-    transform: [{ translateY: heroY.value }],
-  }));
-
-  const planAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: planOpacity.value,
-  }));
-
-  // Persist to store whenever holdings change
-  useEffect(() => {
-    if (holdings.length > 0) {
-      setPortfolioXRay(xray);
-    }
+    if (holdings.length > 0) setPortfolioXRay(xray);
   }, [holdings, xray, setPortfolioXRay]);
 
-  // Fetch AI plan whenever holdings load
   useEffect(() => {
     if (!profile || holdings.length === 0) return;
-
+    const safeProfile = profile;
     let active = true;
-
     void (async () => {
       try {
-        setPlanLoading(true);
-        setPlanError("");
-        const result = await GeminiService.getPortfolioRebalancingPlan(profile, xray);
+        setPlanLoading(true); setPlanError("");
+        const result = await GeminiService.getPortfolioRebalancingPlan(safeProfile, xray);
         if (active) setPlan(result);
-      } catch (error) {
-        if (active) {
-          setPlan(fallbackPlan);
-          setPlanError(
-            error instanceof Error ? error.message : "Showing offline rebalancing plan."
-          );
-        }
-      } finally {
-        if (active) setPlanLoading(false);
-      }
+      } catch (err) {
+        if (active) { setPlan(fallbackPlan); setPlanError(err instanceof Error ? err.message : "Showing offline plan."); }
+      } finally { if (active) setPlanLoading(false); }
     })();
-
     return () => { active = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [holdings]);
 
-  // Calculate metrics using MutualFundService when holdings change
-  useEffect(() => {
-    if (holdings.length === 0) {
-      setPortfolioMetrics(null);
-      setFundMetrics([]);
-      return;
-    }
-
-    let active = true;
-
-    void (async () => {
-      try {
-        setMetricsLoading(true);
-
-        // Convert MFHoldings to Fund objects and Transactions for MutualFundService
-        // Category-based expense ratio defaults (direct plan averages)
-const CATEGORY_EXPENSE_RATIOS: Record<string, number> = {
-  large_cap: 0.95,
-  mid_cap: 1.2,
-  small_cap: 1.4,
-  elss: 1.1,
-  debt: 0.5,
-  hybrid: 1.0,
-  liquid: 0.2,
-  other: 1.0,
-};
-
-const fundMetricsToCalc: Array<{
-  fund: Fund;
-  transactions: Transaction[];
-}> = holdings.map((holding) => {
-  // Use actual transaction dates if available, otherwise fall back to
-  // purchase date estimate based on holding data
-  const transactions: Transaction[] = holding.transactions && holding.transactions.length > 0
-    ? holding.transactions.map((t) => ({
-        date: new Date(t.date),
-        amount: t.amount,
-        units: holding.units / holding.transactions!.length,
-      }))
-    : [
-        {
-          date: new Date(Date.now() - 180 * 24 * 3600 * 1000),
-          amount: -holding.purchaseValue,
-          units: holding.units,
-        },
-        {
-          date: new Date(),
-          amount: holding.currentValue,
-          units: 0,
-        },
-      ];
-
-  return {
-    fund: {
-      schemeCode: holding.id,
-      schemeName: holding.name,
-      category: holding.category,
-      nav: holding.nav,
-      expenseRatio: CATEGORY_EXPENSE_RATIOS[holding.category] ?? 1.0,
-    },
-    transactions,
-  };
-});
-
-        // Calculate metrics for each fund
-        const metricsResults: Array<{
-          fund: Fund;
-          metrics: PortfolioMetrics;
-        }> = [];
-
-        for (const item of fundMetricsToCalc) {
-          const metrics = await calculateMetrics(item.transactions, item.fund, false);
-          if (metrics) {
-            metricsResults.push({ fund: item.fund, metrics });
-          }
-        }
-
-        if (active) {
-          setFundMetrics(metricsResults);
-
-          // Calculate portfolio-level metrics
-          const totalInvested = metricsResults.reduce((sum, m) => sum + m.metrics.totalInvested, 0);
-          const currentValue = metricsResults.reduce((sum, m) => sum + m.metrics.currentValue, 0);
-          const totalReturn = currentValue - totalInvested;
-          const absoluteReturn = totalInvested > 0 ? (totalReturn / totalInvested) * 100 : 0;
-          const avgXIRR =
-            metricsResults.length > 0
-              ? metricsResults.reduce((sum, m) => sum + m.metrics.xirr, 0) / metricsResults.length
-              : 0;
-          const totalExpenseDrag = metricsResults.reduce((sum, m) => sum + m.metrics.expenseDragAnnual, 0);
-
-          const portfolioLevelMetrics: PortfolioMetrics = {
-            totalInvested,
-            currentValue,
-            totalReturn,
-            absoluteReturn,
-            xirr: avgXIRR,
-            expenseDragAnnual: totalExpenseDrag,
-            lastUpdated: Date.now(),
-          };
-
-          setPortfolioMetrics(portfolioLevelMetrics);
-        }
-      } catch (error) {
-        console.error("Error calculating metrics:", error);
-      } finally {
-        if (active) setMetricsLoading(false);
-      }
-    })();
-
-    return () => {
-      active = false;
-    };
-  }, [holdings]);
-
   if (!profile) return <EmptyState />;
 
-  const currentProfile = profile;
+  // ── persist ───────────────────────────────────────────────────────────────
 
-  async function handleAddSchemeCodes(codes: string[]) {
-    if (!currentProfile) return;
-    try {
-      setParsing(true);
-      
-      const validCodes = codes.filter(code => /^\d{6}$/.test(code.trim()));
-      if (validCodes.length === 0) {
-        Alert.alert("Error", "Please enter valid 6-digit scheme codes");
-        return;
-      }
-      if (validCodes.length > 20) {
-        Alert.alert("Error", "Maximum 20 schemes at a time");
-        return;
-      }
-
-      const newHoldings: MFHolding[] = [];
-      
-      const fetchWithTimeout = (url: string, timeout = 5000) => {
-        return Promise.race([
-          fetch(url),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), timeout))
-        ]);
-      };
-
-      for (const code of validCodes) {
-        try {
-          const res = await fetchWithTimeout(`https://api.mfapi.in/mf/${code}`) as Response;
-          const json = await res.json();
-          if (json.status === "SUCCESS") {
-            const nav = Number(json.data[0]?.nav) || 10;
-            
-            const amfiCat = (json.meta.scheme_category || "").toLowerCase();
-            let mappedCat: MFHolding["category"] = "other";
-            if (amfiCat.includes("large")) mappedCat = "large_cap";
-            else if (amfiCat.includes("mid")) mappedCat = "mid_cap";
-            else if (amfiCat.includes("small")) mappedCat = "small_cap";
-            else if (amfiCat.includes("equity") || amfiCat.includes("flexi") || amfiCat.includes("multi")) mappedCat = "large_cap";
-            else if (amfiCat.includes("elss")) mappedCat = "elss";
-            else if (amfiCat.includes("debt") || amfiCat.includes("bond")) mappedCat = "debt";
-            else if (amfiCat.includes("hybrid") || amfiCat.includes("balanced") || amfiCat.includes("arbitrage")) mappedCat = "hybrid";
-            else if (amfiCat.includes("liquid")) mappedCat = "liquid";
-
-            newHoldings.push({
-              id: code.toString(),
-              name: json.meta.scheme_name,
-              category: mappedCat,
-              purchaseValue: nav * 100, 
-              currentValue: nav * 100,
-              nav: nav,
-              units: 100,
-              xirr: null,
-              transactions: [{
-                date: new Date(),
-                amount: nav * 100,
-              }],
-            });
-          }
-        } catch (e) {
-          console.error("Failed to fetch MFAPI for code: " + code, e);
-        }
-      }
-      
-      if (newHoldings.length === 0) {
-        Alert.alert("Error", "Could not verify any of the scheme codes. Please try again.");
-        return;
-      }
-      
-setHoldings((prev) => {
-  const next = [...prev, ...newHoldings];
-  const updatedProfile = {
-    ...currentProfile,
-    camsData: {
-      ...currentProfile.camsData,
-      holdings: next,
-    }
-  };
-  setCurrentProfile(updatedProfile);
-
-  // Persist to SecureStore + Supabase so holdings survive app restarts
-  void ProfileService.saveProfile(updatedProfile, session).catch((e) => {
-    console.warn("[PortfolioXRay] Failed to persist holdings:", e);
-    Alert.alert("Warning", "Holdings added but not saved to cloud. Please refresh when online.");
-  });
-
-  return next;
-});
-
-Alert.alert("Success", `Successfully added ${newHoldings.length} fund${newHoldings.length !== 1 ? 's' : ''}. Calculating metrics...`);
-    } finally {
-      setParsing(false);
-    }
+  function persistHoldings(next: MFHolding[]) {
+    if (!profile) return;
+    setHoldings(next);
+    const updatedProfile = { ...profile, camsData: { holdings: next } };
+    setCurrentProfile(updatedProfile);
+    void ProfileService.saveProfile(updatedProfile, session).catch((e) =>
+      console.warn("[PortfolioXRay] Failed to persist:", e)
+    );
   }
+
+  // ── handlers ──────────────────────────────────────────────────────────────
 
   async function handleParseStatement() {
     try {
-      setParsing(true);
-      setPlanError("");
-      setParseNote("");
-
+      setParsing(true); setPlanError(""); setParseNote("");
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: false,
-        base64: true,
-        quality: 0.9,
+        allowsEditing: false, base64: true, quality: 0.9,
       });
-
       if (result.canceled) return;
-
       const asset = result.assets[0];
       if (!asset?.base64) throw new Error("Image did not include base64 data.");
-
-      const parsed = await GeminiService.parseCAMSStatement(
-        asset.base64,
-        asset.mimeType ?? "image/jpeg"
-      );
-
+      const parsed = await GeminiService.parseCAMSStatement(asset.base64, asset.mimeType ?? "image/jpeg");
       const mapped = mapCAMSToHoldings(parsed);
-if (mapped.length === 0) {
-  throw new Error(
-    "No fund holdings found in the image. Try a clearer screenshot showing fund names and values."
-  );
-}
+      if (mapped.length === 0) throw new Error("No fund holdings found. Try a clearer screenshot.");
+      setScanPreview(asset.uri);
+      setParseNote(parsed.notes ?? mapped.length + " fund" + (mapped.length !== 1 ? "s" : "") + " detected.");
+      persistHoldings(mapped);
+    } catch (err) {
+      Alert.alert("Unable to parse statement", err instanceof Error ? err.message : "Please try a clearer image.");
+    } finally { setParsing(false); }
+  }
 
-setScanPreview(asset.uri);
-setParseNote(
-  parsed.notes ??
-    `${mapped.length} fund${mapped.length !== 1 ? "s" : ""} detected. Review the values before relying on them for decisions.`
-);
-setHoldings(mapped);
+  function handleAddSchemeHoldings(newHoldings: MFHolding[]) {
+    setHoldings((prev) => {
+      const existingIds = new Set(prev.map((h) => h.id));
+      const next = [...prev, ...newHoldings.filter((h) => !existingIds.has(h.id))];
+      persistHoldings(next);
+      return next;
+    });
+    setShowAddForm(false);
+  }
 
-// Persist CAMS parsed holdings so they survive app restarts
-const updatedProfile = {
-  ...currentProfile,
-  camsData: { holdings: mapped },
-};
-setCurrentProfile(updatedProfile);
-void ProfileService.saveProfile(updatedProfile, session).catch((e) => {
-  console.warn("[PortfolioXRay] Failed to persist CAMS holdings:", e);
-  Alert.alert("Warning", "Holdings parsed but not saved to cloud. Please try again when online.");
-});
-    } catch (error) {
+  function handleSaveEditedHolding(updated: MFHolding) {
+    setHoldings((prev) => { const next = prev.map((h) => h.id === updated.id ? updated : h); persistHoldings(next); return next; });
+    setEditingHolding(null);
+  }
+
+  function handleDeleteHolding(id: string) {
+    Alert.alert("Remove holding", "Remove this fund from your portfolio?", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Remove", style: "destructive", onPress: () => {
+        setHoldings((prev) => { const next = prev.filter((h) => h.id !== id); persistHoldings(next); return next; });
+        setEditingHolding(null);
+      }},
+    ]);
+  }
+
+  // ── NAV refresh ───────────────────────────────────────────────────────────
+
+  async function handleRefreshNAVs() {
+    const refreshable = holdings.filter((h) => !!h.schemeCode);
+    if (refreshable.length === 0) {
       Alert.alert(
-        "Unable to parse statement",
-        error instanceof Error ? error.message : "Please try a clearer image."
+        "No scheme codes found",
+        "Holdings added via scheme code can be refreshed. Edit a holding to add a scheme code to CAMS-imported funds."
       );
+      return;
+    }
+
+    try {
+      setRefreshing(true);
+      setRefreshNote("Fetching latest NAVs...");
+      let updated = 0;
+      let failed  = 0;
+      const now   = new Date();
+
+      const updatedHoldings = await Promise.all(
+        holdings.map(async (h) => {
+          if (!h.schemeCode) return h;
+          const result = await fetchLatestNAV(h.schemeCode);
+          if (!result) { failed++; return h; }
+          updated++;
+          return { ...h, nav: result.nav, currentValue: h.units * result.nav } as MFHolding;
+        })
+      );
+
+      persistHoldings(updatedHoldings);
+      const timeStr = now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+      setLastRefreshed(timeStr);
+      setRefreshNote(
+        updated + " fund" + (updated !== 1 ? "s" : "") + " updated" +
+        (failed > 0 ? " · " + failed + " failed" : "") +
+        " · " + timeStr
+      );
+    } catch {
+      setRefreshNote("Refresh failed. Check your connection.");
     } finally {
-      setParsing(false);
+      setRefreshing(false);
     }
   }
 
   async function handleRefreshPlan() {
+    if (!profile) return;
+    const safeProfile = profile;
     try {
-      setPlanLoading(true);
-      setPlanError("");
-      const result = await GeminiService.getPortfolioRebalancingPlan(currentProfile, xray);
+      setPlanLoading(true); setPlanError("");
+      const result = await GeminiService.getPortfolioRebalancingPlan(safeProfile, xray);
       setPlan(result);
-    } catch (error) {
+    } catch (err) {
       setPlan(fallbackPlan);
-      setPlanError(
-        error instanceof Error ? error.message : "Showing offline rebalancing plan."
-      );
-    } finally {
-      setPlanLoading(false);
-    }
+      setPlanError(err instanceof Error ? err.message : "Showing offline plan.");
+    } finally { setPlanLoading(false); }
   }
 
   async function handleShare() {
     try {
       setSharing(true);
-
       const canBio = await AuthService.canUseBiometric();
       if (canBio) {
         const verified = await AuthService.promptBiometric("Confirm before sharing portfolio card");
         if (!verified) return;
       }
-
-      if (!(await Sharing.isAvailableAsync())) {
-        throw new Error("Sharing is not available on this device.");
-      }
-
+      if (!(await Sharing.isAvailableAsync())) throw new Error("Sharing is not available.");
       const uri = await shareCardRef.current?.capture?.();
       if (!uri) throw new Error("Unable to generate the share card.");
-
-      await Sharing.shareAsync(uri, {
-        dialogTitle: "Share your ET FinMentor portfolio X-Ray",
-      });
-    } catch (error) {
-      Alert.alert(
-        "Unable to share",
-        error instanceof Error ? error.message : "Please try again."
-      );
-    } finally {
-      setSharing(false);
-    }
+      await Sharing.shareAsync(uri, { dialogTitle: "Share your ET FinMentor portfolio X-Ray" });
+    } catch (err) {
+      Alert.alert("Unable to share", err instanceof Error ? err.message : "Please try again.");
+    } finally { setSharing(false); }
   }
 
-function handleSaveEditedHolding(updatedHolding: MFHolding) {
-  setHoldings((prev) => {
-    const next = prev.map((h) => (h.id === updatedHolding.id ? updatedHolding : h));
-    const updatedProfile = {
-      ...currentProfile,
-      camsData: {
-        ...currentProfile.camsData,
-        holdings: next,
-      }
-    };
-    setCurrentProfile(updatedProfile);
-
-    // Persist edited holdings
-    void ProfileService.saveProfile(updatedProfile, session).catch((e) => {
-      console.warn("[PortfolioXRay] Failed to persist edited holding:", e);
-      Alert.alert("Warning", "Changes made but not saved to cloud. Please try again when online.");
-    });
-
-    return next;
-  });
-  setEditingHolding(null);
-  Alert.alert("Success", "Holding updated successfully.");
-}
-
   const overallXirrColor = xirrColor(xray.overallXIRR);
-  const chartWidth = Math.min(width - Spacing["3xl"] * 2, 320);
-  
+  const xirrText         = xray.overallXIRR !== null ? xray.overallXIRR.toFixed(1) + "%" : "N/A";
+  const dragText         = formatINR(xray.expenseRatioDrag) + "/yr";
+
+  // ── render ────────────────────────────────────────────────────────────────
+
   return (
     <Screen scroll>
-      {/* ── Hero ── */}
-      <Animated.View style={[styles.hero, heroAnimatedStyle]}>
-        <Text style={styles.title}>Portfolio X-Ray</Text>
-        <Text style={styles.subtitle}>
-          Enter your fund holdings or upload a CAMS/KFintech statement to get your true XIRR,
-          fund overlap, expense drag, and a personalised rebalancing plan.
-        </Text>
-      </Animated.View>
 
-      {/* ── Manual Input Section (Primary) ── */}
-      <Animatable.View animation="fadeInUp" delay={50} duration={500} style={styles.section}>
-        <SchemeInputForm
-          onSubmit={(codes) => void handleAddSchemeCodes(codes)}
-          isLoading={parsing}
-        />
-      </Animatable.View>
+      <View style={styles.pageHeader}>
+        <Text style={styles.screenEyebrow}>Portfolio X-Ray</Text>
+        <Text style={styles.screenTitle}>Your funds, dissected</Text>
+      </View>
 
-      {/* ── Upload ── */}
-      <Animatable.View animation="fadeInUp" delay={80} duration={500} style={styles.section}>
+      {/* ── hero card ── */}
+      {hasPortfolio ? (
+        <Animatable.View animation="fadeInUp" delay={0} duration={400}>
+          <View style={styles.heroCard}>
+            <Text style={styles.heroLabel}>Total value</Text>
+            <Text style={styles.heroValue}>{formatINR(xray.totalValue)}</Text>
+
+            <View style={styles.tagRow}>
+              <View style={[styles.tag, { backgroundColor: Colors.tealDim }]}>
+                <Text style={[styles.tagText, { color: Colors.teal }]}>{xirrText + " XIRR"}</Text>
+              </View>
+              <View style={[styles.tag, { backgroundColor: Colors.amberDim }]}>
+                <Text style={[styles.tagText, { color: Colors.amber }]}>{dragText + " drag"}</Text>
+              </View>
+              <View style={[styles.tag, { backgroundColor: Colors.s2 }]}>
+                <Text style={[styles.tagText, { color: Colors.t1 }]}>{holdings.length + " funds"}</Text>
+              </View>
+            </View>
+
+            <View style={styles.allocBar}>
+              {pieData.map(({ cat, pct }) => (
+                <View key={cat} style={[styles.allocSeg, { flex: pct, backgroundColor: categoryColor(cat) }]} />
+              ))}
+            </View>
+            <View style={styles.allocLegend}>
+              {pieData.map(({ cat, pct }) => (
+                <View key={cat} style={styles.allocItem}>
+                  <View style={[styles.allocDot, { backgroundColor: categoryColor(cat) }]} />
+                  <Text style={styles.allocText}>{CATEGORY_LABELS[cat] + " " + pct.toFixed(0) + "%"}</Text>
+                </View>
+              ))}
+            </View>
+
+            {/* ── refresh NAVs row ── */}
+            <View style={styles.refreshNavRow}>
+              <View style={styles.refreshNavLeft}>
+                <Text style={styles.refreshNavTime}>
+                  {lastRefreshed
+                    ? "NAVs as of " + lastRefreshed
+                    : refreshableCount > 0
+                      ? refreshableCount + " fund" + (refreshableCount !== 1 ? "s" : "") + " refreshable"
+                      : "Add scheme codes to enable refresh"}
+                </Text>
+                {refreshNote ? <Text style={styles.refreshNavNote}>{refreshNote}</Text> : null}
+              </View>
+              <TouchableOpacity
+                style={[styles.refreshNavBtn, refreshing && styles.refreshNavBtnDisabled]}
+                onPress={handleRefreshNAVs}
+                disabled={refreshing}
+                activeOpacity={0.8}
+              >
+                {refreshing
+                  ? <ActivityIndicator color={Colors.bg} size="small" style={{ width: 52 }} />
+                  : <Text style={styles.refreshNavBtnText}>Refresh NAVs</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Animatable.View>
+      ) : null}
+
+      {/* ── add funds ── */}
+      <Animatable.View animation="fadeInUp" delay={50} duration={400}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionLabel}>Add funds</Text>
+        </View>
         <View style={styles.uploadCard}>
-          <Text style={styles.sectionTitle}>Upload statement</Text>
-          <Text style={styles.cardBody}>
-            Take a clear screenshot of your CAMS or KFintech consolidated statement showing fund
-            names, units, NAV, and current value.
+          <Text style={styles.uploadTitle}>Upload statement</Text>
+          <Text style={styles.uploadBody}>
+            CAMS or KFintech screenshot — Gemini Vision extracts holdings with real transaction dates for accurate XIRR.
           </Text>
           <TouchableOpacity
             disabled={parsing}
-            onPress={async () => {
-              try {
-                await handleParseStatement();
-              } catch (e) {
-                Alert.alert(
-                  "Unable to parse statement",
-                  e instanceof Error ? e.message : "Please try a clearer image."
-                );
-              }
-            }}
-            style={[styles.uploadBtn, parsing ? styles.uploadBtnDisabled : null]}
+            onPress={handleParseStatement}
+            style={[styles.uploadBtn, parsing && styles.uploadBtnDisabled]}
+            activeOpacity={0.8}
           >
-            <Text style={styles.uploadBtnText}>Upload CAMS / KFintech</Text>
+            {parsing ? <ActivityIndicator color={Colors.bg} size="small" /> : <Text style={styles.uploadBtnText}>Upload CAMS / KFintech</Text>}
           </TouchableOpacity>
-          {parsing ? (
-            <View style={styles.uploadLoadingRow}>
-              <ActivityIndicator color="#1D9E75" size="small" />
-              <Text style={styles.uploadLoadingText}>Analysing portfolio...</Text>
-            </View>
-          ) : null}
-          {scanPreview ? (
-            <Image source={{ uri: scanPreview }} style={styles.scanPreview} />
-          ) : null}
+          {scanPreview ? <Image source={{ uri: scanPreview }} style={styles.scanPreview} /> : null}
           {parseNote ? <Text style={styles.parseNote}>{parseNote}</Text> : null}
         </View>
+        <TouchableOpacity style={styles.addByCodeBtn} onPress={() => setShowAddForm(true)} activeOpacity={0.8}>
+          <Text style={styles.addByCodeText}>+ Add by scheme code</Text>
+        </TouchableOpacity>
       </Animatable.View>
 
-      {holdings.length > 0 ? (
+      {/* ── holdings list ── */}
+      {hasPortfolio ? (
         <>
-          {/* ── New Metrics Dashboard ── */}
-<Animatable.View animation="fadeInUp" delay={100} duration={500} style={styles.section}>
-  {metricsLoading && !portfolioMetrics ? (
-    <View style={styles.metricsLoadingCard}>
-      <ActivityIndicator size="small" color={Colors.purple} />
-      <Text style={styles.metricsLoadingText}>Fetching live NAV data...</Text>
-    </View>
-  ) : (
-    <AtAGlanceHeader metrics={portfolioMetrics} previousValue={xray.totalInvested} />
-  )}
-</Animatable.View>
-
-          {/* ── Fund Performance Table ── */}
-          {fundMetrics.length > 0 && (
-            <Animatable.View animation="fadeInUp" delay={140} duration={500} style={styles.section}>
-              <FundPerformanceTable
-                funds={fundMetrics.map((item) => ({
-                  fund: item.fund,
-                  metrics: item.metrics,
-                }))}
-              />
-            </Animatable.View>
-          )}
-
-          {/* ── Smart Recommendations ── */}
-          {portfolioMetrics && (
-            <Animatable.View animation="fadeInUp" delay={160} duration={500} style={styles.section}>
-              <SmartRecommendationPanel
-                metrics={recommendationMetrics}
-                fundNames={fundNamesList}
-              />
-            </Animatable.View>
-          )}
-          {/* ── Metrics loading indicator ── */}
-{metricsLoading && (
-  <Animatable.View animation="fadeIn" duration={300} style={styles.section}>
-    <View style={styles.metricsLoadingCard}>
-      <ActivityIndicator size="small" color={Colors.purple} />
-      <Text style={styles.metricsLoadingText}>Calculating portfolio metrics...</Text>
-    </View>
-  </Animatable.View>
-)}
-
-          {/* ── Summary strip ── */}
-          <Animatable.View animation="fadeInUp" delay={220} duration={500} style={styles.section}>
-            <View style={styles.summaryStrip}>
-              <View style={styles.summaryCol}>
-                <Text style={styles.summaryLabel}>Portfolio value</Text>
-                <Text style={styles.summaryValue}>{formatINR(xray.totalValue)}</Text>
-              </View>
-              <View style={styles.summaryDivider} />
-              <View style={styles.summaryCol}>
-                <Text style={styles.summaryLabel}>Overall XIRR</Text>
-                <Text style={[styles.summaryXirr, { color: overallXirrColor }]}>
-                  {xray.overallXIRR !== null ? `${xray.overallXIRR.toFixed(1)}%` : "—"}
-                </Text>
-              </View>
-              <View style={styles.summaryDivider} />
-              <View style={styles.summaryCol}>
-                <Text style={styles.summaryLabel}>Expense drag</Text>
-                <Text style={styles.summaryDrag}>{formatINR(xray.expenseRatioDrag)}/yr</Text>
-              </View>
+          <Animatable.View animation="fadeInUp" delay={100} duration={400}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionLabel}>{"Holdings · " + holdings.length + " funds"}</Text>
+              <Text style={styles.sectionNote}>Tap to edit</Text>
             </View>
-          </Animatable.View>
-
-          {/* ── Benchmark Comparison ── */}
-          <Animatable.View animation="fadeInUp" delay={240} duration={500} style={styles.section}>
-            <Text style={styles.sectionTitle}>Benchmark Comparison (NIFTY 50)</Text>
-            <View style={[styles.card, styles.benchmarkCard]}>
-              <View style={styles.benchmarkRow}>
-                <View style={styles.benchmarkCol}>
-                  <Text style={styles.benchmarkLabel}>Your XIRR</Text>
-                  <Text style={[styles.benchmarkValue, { color: overallXirrColor }]}>
-                    {xray.overallXIRR !== null ? `${xray.overallXIRR.toFixed(1)}%` : "—"}
-                  </Text>
-                </View>
-                <View style={styles.benchmarkCol}>
-                  <Text style={styles.benchmarkLabel}>NIFTY 50</Text>
-                  <Text style={styles.benchmarkValue}>
-                    12.5%
-                  </Text>
-                </View>
-                <View style={[styles.benchmarkCol, styles.benchmarkColRight]}>
-                  <Text style={styles.benchmarkLabel}>Alpha</Text>
-                  <Text
-                    style={[
-                      styles.benchmarkValue,
-                      { color: (xray.overallXIRR || 0) >= 12.5 ? Colors.teal : Colors.red },
-                    ]}
-                  >
-                    {xray.overallXIRR !== null ? `${((xray.overallXIRR || 0) - 12.5) > 0 ? "+" : ""}${((xray.overallXIRR || 0) - 12.5).toFixed(1)}%` : "—"}
-                  </Text>
-                </View>
-              </View>
-              <Text style={styles.benchmarkBody}>
-                Alpha is your excess return relative to the benchmark. A positive alpha means your fund selection is outperforming a simple low-cost index fund.
-              </Text>
-            </View>
-          </Animatable.View>
-
-          {/* ── Category donut ── */}
-          {pieData.length > 0 ? (
-            <Animatable.View animation="fadeInUp" delay={260} duration={500} style={styles.section}>
-              <Text style={styles.sectionTitle}>Category allocation</Text>
-              <View style={styles.card}>
-                <VictoryPie
-                  data={pieData}
-                  width={chartWidth}
-                  height={chartWidth}
-                  colorScale={PIE_COLORS}
-                  innerRadius={chartWidth * 0.22}
-                  padAngle={2}
-                  labels={({ datum }) => `${datum.x}\n${(datum.y as number).toFixed(0)}%`}
-                  style={{
-                    labels: {
-                      fontFamily: Typography.fontFamily.body,
-                      fontSize: 11,
-                      fill: Colors.textSecondary,
-                    },
-                  }}
-                  padding={64}
-                />
-              </View>
-            </Animatable.View>
-          ) : null}
-
-          {/* ── Holdings list ── */}
-          <Animatable.View animation="fadeInUp" delay={300} duration={500} style={styles.section}>
-            <Text style={styles.sectionTitle}>Holdings ({holdings.length})</Text>
-            <View style={styles.stack}>
+            <View style={styles.holdingList}>
               {holdings.map((h, i) => (
-                <HoldingCard
-                  key={h.id}
-                  holding={h}
-                  index={i}
-                  onEdit={() => setEditingHolding(h)}
-                />
+                <HoldingCard key={h.id} holding={h} index={i} onEdit={() => setEditingHolding(h)} />
               ))}
             </View>
           </Animatable.View>
 
-          {/* ── Overlap alerts ── */}
+          {/* ── benchmark ── */}
+          <Animatable.View animation="fadeInUp" delay={140} duration={400}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionLabel}>Benchmark · vs Nifty 50</Text>
+            </View>
+            <View style={styles.card}>
+              <View style={styles.benchRow}>
+                <View style={styles.benchCol}>
+                  <Text style={styles.benchLabel}>Your XIRR</Text>
+                  <Text style={[styles.benchValue, { color: overallXirrColor }]}>{xirrText}</Text>
+                </View>
+                <View style={styles.benchDivider} />
+                <View style={styles.benchCol}>
+                  <Text style={styles.benchLabel}>Nifty 50</Text>
+                  <Text style={styles.benchValue}>12.5%</Text>
+                </View>
+                <View style={styles.benchDivider} />
+                <View style={styles.benchCol}>
+                  <Text style={styles.benchLabel}>Alpha</Text>
+                  <Text style={[styles.benchValue, {
+                    color: xray.overallXIRR !== null ? xray.overallXIRR >= 12.5 ? Colors.teal : Colors.red : Colors.t2,
+                  }]}>
+                    {xray.overallXIRR !== null
+                      ? (xray.overallXIRR - 12.5 > 0 ? "+" : "") + (xray.overallXIRR - 12.5).toFixed(1) + "%"
+                      : "N/A"}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.benchNote}>
+                <Text style={styles.benchNoteText}>
+                  {xray.overallXIRR === null
+                    ? "Add purchase dates to calculate accurate XIRR and alpha."
+                    : xray.overallXIRR >= 12.5
+                      ? "Your active fund selection is beating the index. Review annually to ensure it stays ahead after fees."
+                      : "Marginally below benchmark after fees. Consider switching high-expense funds to index equivalents."}
+                </Text>
+              </View>
+            </View>
+          </Animatable.View>
+
+          {/* ── overlap ── */}
           {xray.overlapPairs.length > 0 ? (
-            <Animatable.View animation="fadeInUp" delay={340} duration={500} style={styles.section}>
-              <Text style={styles.sectionTitle}>Fund overlap detected</Text>
-              <View style={styles.stack}>
-                {xray.overlapPairs.map((pair, i) => (
-                  <OverlapCard key={i} pair={pair} />
-                ))}
+            <Animatable.View animation="fadeInUp" delay={170} duration={400}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionLabel}>Fund overlap</Text>
+              </View>
+              <View style={styles.overlapList}>
+                {xray.overlapPairs.map((pair, i) => <OverlapCard key={i} pair={pair} />)}
               </View>
             </Animatable.View>
           ) : null}
 
-          {/* ── Expense drag ── */}
-          <Animatable.View animation="fadeInUp" delay={380} duration={500} style={styles.section}>
-            <Text style={styles.sectionTitle}>Expense ratio drag</Text>
+          {/* ── expense drag ── */}
+          <Animatable.View animation="fadeInUp" delay={200} duration={400}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionLabel}>Expense drag</Text>
+            </View>
             <View style={styles.dragCard}>
+              <Text style={styles.dragLabel}>Annual drag vs index equivalent</Text>
               <Text style={styles.dragValue}>{formatINR(xray.expenseRatioDrag)}</Text>
-              <Text style={styles.dragLabel}>lost per year vs index equivalent (0.1% TER)</Text>
               <Text style={styles.dragBody}>
-                Switching high-expense funds to their direct plan equivalent or a Nifty 50 index
-                fund is the single easiest way to recover this amount annually.
+                Lost per year to active fund expense ratios vs a 0.1% Nifty 50 index. Switching to direct plan equivalents recovers this instantly.
               </Text>
             </View>
           </Animatable.View>
 
           {/* ── AI rebalancing plan ── */}
-          <Animatable.View animation="fadeInUp" delay={420} duration={500} style={styles.section}>
+          <Animatable.View animation="fadeInUp" delay={230} duration={400}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Rebalancing plan</Text>
-              <TouchableOpacity
-                disabled={planLoading}
-                onPress={async () => {
-                  try {
-                    await handleRefreshPlan();
-                  } catch (e) {
-                    setPlanError(e instanceof Error ? e.message : "Unable to refresh plan.");
-                  }
-                }}
-                style={styles.refreshGhostBtn}
-              >
-                <Text style={styles.refreshGhostText}>{planLoading ? "Refreshing..." : "Refresh"}</Text>
+              <Text style={styles.sectionLabel}>AI rebalancing plan</Text>
+              <TouchableOpacity disabled={planLoading} onPress={handleRefreshPlan} style={styles.refreshBtn}>
+                <Text style={styles.refreshBtnText}>{planLoading ? "Refreshing..." : "Refresh"}</Text>
               </TouchableOpacity>
             </View>
-            {planError ? <Text style={styles.warningText}>{planError}</Text> : null}
-            <Animated.View style={[styles.planCard, planAnimatedStyle]}>
-              {planLoading && !plan ? (
-                <Text style={styles.loadingText}>FinMentor is building your plan...</Text>
-              ) : (
-                <Text style={styles.planText}>{plan || fallbackPlan}</Text>
-              )}
-            </Animated.View>
+            {planError ? <Text style={styles.errorText}>{planError}</Text> : null}
+            <View style={styles.planList}>
+              {(plan || fallbackPlan).split("\n\n").map((line, i) => (
+                <View key={i} style={styles.tipCard}>
+                  <Text style={styles.tipNum}>{"0" + (i + 1)}</Text>
+                  <Text style={styles.tipText}>{line.replace(/^\d+\.\s*/, "")}</Text>
+                </View>
+              ))}
+            </View>
           </Animatable.View>
 
-          {/* ── Share ── */}
-          <Animatable.View animation="fadeInUp" delay={460} duration={500} style={styles.section}>
-            <View style={styles.shareOuter}>
-              <View style={styles.shareHeader}>
-                <Text style={styles.shareTitle}>Share X-Ray summary</Text>
-                <Button
-                  label="Share Card"
-                  loading={sharing}
-                  onPress={() => {
-  handleShare().catch((e) => {
-    Alert.alert("Unable to share", e instanceof Error ? e.message : "Please try again.");
-  });
-}}
-                />
+          {/* ── share ── */}
+          <Animatable.View animation="fadeInUp" delay={260} duration={400}>
+            <View style={styles.shareRow}>
+              <View style={styles.shareInfo}>
+                <Text style={styles.shareTitle}>Export X-Ray card</Text>
+                <Text style={styles.shareSubtitle}>Biometric required · no fund names shared</Text>
               </View>
-              <Text style={styles.shareBody}>
-                Biometric confirmation required. Card shows portfolio value and XIRR only — no
-                fund names or rupee breakdowns.
-              </Text>
+              <TouchableOpacity style={styles.shareBtn} onPress={handleShare} disabled={sharing} activeOpacity={0.8}>
+                {sharing ? <ActivityIndicator color={Colors.bg} size="small" /> : <Text style={styles.shareBtnText}>Share</Text>}
+              </TouchableOpacity>
             </View>
           </Animatable.View>
         </>
       ) : (
-        /* ── Empty holdings placeholder ── */
-        <Animatable.View animation="fadeInUp" delay={140} duration={500} style={styles.section}>
+        <Animatable.View animation="fadeInUp" delay={100} duration={400}>
           <View style={styles.card}>
             <Text style={styles.cardTitle}>No portfolio data yet</Text>
             <Text style={styles.cardBody}>
-              Upload a CAMS or KFintech consolidated account statement above. A single clear
-              screenshot of the summary page is usually enough.
+              Upload a CAMS or KFintech statement above, or tap the scheme code button to add funds manually.
             </Text>
           </View>
         </Animatable.View>
       )}
 
-      {/* ── Off-screen ViewShot capture card ── */}
+      <View style={styles.bottomPad} />
+
+      {/* ── ViewShot ── */}
       <View pointerEvents="none" style={styles.captureContainer}>
         <ViewShot ref={shareCardRef} options={{ format: "png", quality: 1 }}>
           <View collapsable={false} style={styles.captureCard}>
@@ -1056,454 +718,143 @@ function handleSaveEditedHolding(updatedHolding: MFHolding) {
             <Text style={styles.captureLabel}>Portfolio value</Text>
             <View style={styles.captureDivider} />
             <Text style={[styles.captureXirr, { color: overallXirrColor }]}>
-              {xray.overallXIRR !== null ? `${xray.overallXIRR.toFixed(1)}% XIRR` : "XIRR: insufficient data"}
+              {xray.overallXIRR !== null ? xray.overallXIRR.toFixed(1) + "% XIRR" : "XIRR: insufficient data"}
             </Text>
-            <Text style={styles.captureLabel}>
-              {holdings.length} fund{holdings.length !== 1 ? "s" : ""} analysed
-            </Text>
+            <Text style={styles.captureLabel}>{holdings.length + " fund" + (holdings.length !== 1 ? "s" : "") + " analysed"}</Text>
           </View>
         </ViewShot>
       </View>
 
-      {/* ── Holding Edit Modal ── */}
-      {editingHolding && (
+      {/* ── modals ── */}
+      {editingHolding ? (
         <HoldingEditModal
           holding={editingHolding}
           isVisible={!!editingHolding}
           onClose={() => setEditingHolding(null)}
           onSave={handleSaveEditedHolding}
+          onDelete={() => handleDeleteHolding(editingHolding.id)}
         />
-      )}
+      ) : null}
+
+      <Modal
+        visible={showAddForm}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowAddForm(false)}
+      >
+        <SchemeInputForm onSubmit={handleAddSchemeHoldings} onCancel={() => setShowAddForm(false)} />
+      </Modal>
+
     </Screen>
   );
 }
 
-// ─── styles ──────────────────────────────────────────────────────────────────
+// ─── styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  hero: {
-    gap: Spacing.md,
-    marginBottom: Spacing.xl,
-  },
-  eyebrow: {
-    color: Colors.purple,
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.sm,
-    letterSpacing: 0.8,
-    textTransform: "uppercase",
-  },
-  title: {
-    color: "#FFFFFF",
-    fontFamily: Typography.fontFamily.displaySemiBold,
-    fontSize: 28,
-    letterSpacing: -0.5,
-  },
-  subtitle: {
-    color: "rgba(255,255,255,0.4)",
-    fontFamily: Typography.fontFamily.body,
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  section: {
-    gap: Spacing.md,
-    marginBottom: Spacing.xl,
-  },
-  sectionTitle: {
-    color: Colors.textPrimary,
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.lg,
-  },
-  sectionHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  stack: {
-    gap: Spacing.md,
-  },
-  card: {
-    backgroundColor: Colors.card,
-    borderRadius: Radius.lg,
-    borderWidth: 0.5,
-    borderColor: Colors.border,
-    gap: Spacing.md,
-    padding: Spacing.xl,
-  },
-  cardTitle: {
-    color: Colors.textPrimary,
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.lg,
-  },
-  cardBody: {
-    color: Colors.textSecondary,
-    fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.sm,
-    lineHeight: 22,
-  },
-  uploadCard: {
-    backgroundColor: "rgba(29,158,117,0.05)",
-    borderRadius: 20,
-    borderWidth: 0.5,
-    borderColor: "rgba(29,158,117,0.2)",
-    gap: Spacing.lg,
-    padding: Spacing.xl,
-  },
-  uploadBtn: {
-    backgroundColor: "#1D9E75",
-    borderRadius: 99,
-    minHeight: 52,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: Spacing.lg,
-  },
-  uploadBtnDisabled: {
-    opacity: 0.6,
-  },
-  uploadBtnText: {
-    color: "#FFFFFF",
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.md,
-  },
-  uploadLoadingRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: Spacing.sm,
-  },
-  uploadLoadingText: {
-    color: "#1D9E75",
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.sm,
-  },
-  scanPreview: {
-    width: "100%",
-    height: 160,
-    borderRadius: Radius.md,
-    resizeMode: "cover",
-  },
-  parseNote: {
-    color: "#1D9E75",
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.sm,
-    lineHeight: 22,
-  },
-  summaryStrip: {
-    backgroundColor: "#0D1B35",
-    borderRadius: 20,
-    flexDirection: "row",
-    padding: Spacing.xl,
-    gap: Spacing.md,
-  },
-  summaryCol: {
-    flex: 1,
-    gap: Spacing.xs,
-  },
-  summaryDivider: {
-    width: 0.5,
-    backgroundColor: "rgba(255,255,255,0.08)",
-  },
-  summaryLabel: {
-    color: "rgba(255,255,255,0.35)",
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: 11,
-    letterSpacing: 0.6,
-    textTransform: "uppercase",
-  },
-  summaryValue: {
-    color: Colors.white,
-    fontFamily: Typography.fontFamily.displaySemiBold,
-    fontSize: 18,
-  },
-  summaryXirr: {
-    fontFamily: Typography.fontFamily.displaySemiBold,
-    fontSize: 18,
-  },
-  summaryDrag: {
-    color: Colors.gold,
-    fontFamily: Typography.fontFamily.displaySemiBold,
-    fontSize: 16,
-  },
-  holdingCard: {
-    backgroundColor: "#1A1A1A",
-    borderRadius: 16,
-    borderWidth: 0.5,
-    borderColor: "#2A2A2A",
-    gap: Spacing.md,
-    padding: Spacing.lg,
-  },
-  holdingHeader: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: Spacing.sm,
-  },
-  holdingName: {
-    color: "#FFFFFF",
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: 14,
-    flex: 1,
-    lineHeight: 22,
-  },
-  categoryTag: {
-    borderWidth: 0.5,
-    borderRadius: Radius.full,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 2,
-  },
-  categoryTagText: {
-    color: "rgba(255,255,255,0.82)",
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.xs,
-  },
-  editBadge: {
-    backgroundColor: "rgba(212,175,55,0.10)",
-    borderRadius: 6,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 4,
-  },
-  editBadgeText: {
-    color: "#D4AF37",
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.xs,
-  },
-  holdingMetaRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  metaLabel: {
-    color: Colors.textSecondary,
-    fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.xs,
-    marginBottom: 2,
-  },
-  metaValue: {
-    color: Colors.textPrimary,
-    fontFamily: Typography.fontFamily.displaySemiBold,
-    fontSize: 16,
-  },
-  metaXirrValue: {
-    fontSize: 14,
-  },
-  overlapCard: {
-    borderRadius: 16,
-    borderWidth: 0.5,
-    gap: Spacing.sm,
-    padding: Spacing.lg,
-  },
-  overlapBadge: {
-    alignSelf: "flex-start",
-    borderRadius: Radius.full,
-    borderWidth: 0.5,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: 2,
-  },
-  overlapLevel: {
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.xs,
-    letterSpacing: 0.6,
-  },
-  overlapFunds: {
-    color: "#FFFFFF",
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: 14,
-    lineHeight: 22,
-  },
-  overlapReason: {
-    color: "rgba(255,255,255,0.4)",
-    fontFamily: Typography.fontFamily.body,
-    fontSize: 12,
-    lineHeight: 18,
-  },
-  dragCard: {
-    backgroundColor: "rgba(212,175,55,0.06)",
-    borderRadius: 20,
-    borderWidth: 0.5,
-    borderColor: "rgba(212,175,55,0.2)",
-    gap: Spacing.sm,
-    padding: Spacing.xl,
-  },
-  dragValue: {
-    color: "#D4AF37",
-    fontFamily: Typography.fontFamily.displaySemiBold,
-    fontSize: 28,
-  },
-  dragLabel: {
-    color: "rgba(255,255,255,0.4)",
-    fontFamily: Typography.fontFamily.body,
-    fontSize: 13,
-    lineHeight: 20,
-  },
-  dragBody: {
-    color: "rgba(255,255,255,0.6)",
-    fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.sm,
-    lineHeight: 22,
-  },
-  planCard: {
-    backgroundColor: "rgba(127,119,221,0.06)",
-    borderRadius: 20,
-    borderWidth: 0.5,
-    borderColor: "rgba(127,119,221,0.2)",
-    padding: Spacing.xl,
-  },
-  planText: {
-    color: "rgba(255,255,255,0.8)",
-    fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.md,
-    lineHeight: 26,
-  },
-  refreshGhostBtn: {
-    alignItems: "center",
-    borderColor: "rgba(127,119,221,0.24)",
-    borderRadius: Radius.full,
-    borderWidth: 0.5,
-    justifyContent: "center",
-    minHeight: 32,
-    paddingHorizontal: Spacing.md,
-  },
-  refreshGhostText: {
-    color: "#7F77DD",
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: 12,
-  },
-  loadingText: {
-    color: "#7F77DD",
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.sm,
-  },
-  warningText: {
-    color: Colors.red,
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.sm,
-  },
-  shareOuter: {
-    backgroundColor: "#0D1B35",
-    borderRadius: 20,
-    borderWidth: 0.5,
-    borderColor: "rgba(255,255,255,0.06)",
-    gap: Spacing.md,
-    padding: Spacing.xl,
-  },
-  shareHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  shareTitle: {
-    color: Colors.white,
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.lg,
-  },
-  shareBody: {
-    color: "rgba(255,255,255,0.72)",
-    fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.sm,
-    lineHeight: 22,
-  },
-  captureContainer: {
-    left: -9999,
-    position: "absolute",
-    top: 0,
-  },
-  captureCard: {
-    backgroundColor: Colors.card,
-    borderRadius: Radius.lg,
-    borderWidth: 0.5,
-    borderColor: Colors.border,
-    padding: 28,
-    width: 340,
-    gap: Spacing.sm,
-  },
-  captureBrand: {
-    color: Colors.navy,
-    fontFamily: Typography.fontFamily.display,
-    fontSize: Typography.size.md,
-    marginBottom: Spacing.md,
-  },
-  captureValue: {
-    color: Colors.textPrimary,
-    fontFamily: Typography.fontFamily.display,
-    fontSize: 44,
-  },
-  captureLabel: {
-    color: Colors.textSecondary,
-    fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.sm,
-  },
-  captureDivider: {
-    backgroundColor: Colors.border,
-    height: 1,
-    marginVertical: Spacing.md,
-  },
-  captureXirr: {
-    fontFamily: Typography.fontFamily.display,
-    fontSize: Typography.size.xl,
-  },
-  emptyCard: {
-    backgroundColor: Colors.card,
-    borderRadius: Radius.lg,
-    borderWidth: 0.5,
-    borderColor: Colors.border,
-    gap: Spacing.md,
-    padding: Spacing.xl,
-  },
-  emptyTitle: {
-    color: Colors.textPrimary,
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.lg,
-  },
-  emptyBody: {
-    color: Colors.textSecondary,
-    fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.md,
-    lineHeight: 24,
-  },
-  metricsLoadingCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.md,
-    backgroundColor: Colors.card,
-    borderRadius: Radius.lg,
-    borderWidth: 0.5,
-    borderColor: Colors.border,
-    padding: Spacing.xl,
-  },
-  metricsLoadingText: {
-    color: Colors.textSecondary,
-    fontFamily: Typography.fontFamily.bodyMedium,
-    fontSize: Typography.size.sm,
-  },
-  benchmarkRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 12,
-  },
-  benchmarkCol: {
-    flex: 1,
-  },
-  benchmarkColRight: {
-    alignItems: "flex-end",
-  },
-  benchmarkLabel: {
-    color: "rgba(255,255,255,0.4)",
-    fontFamily: Typography.fontFamily.body,
-    fontSize: Typography.size.sm,
-    marginBottom: 4,
-  },
-  benchmarkValue: {
-    color: "#FFFFFF",
-    fontFamily: Typography.fontFamily.displaySemiBold,
-    fontSize: 24,
-  },
-  benchmarkBody: {
-    color: "rgba(255,255,255,0.4)",
-    fontFamily: Typography.fontFamily.body,
-    fontSize: 12,
-    lineHeight: 18,
-  },
-  benchmarkCard: {
-    backgroundColor: "#1A1A1A",
-    borderColor: "#2A2A2A",
-    borderRadius: 20,
-  },
+  pageHeader:    { marginBottom: Spacing.lg },
+  screenEyebrow: { color: Colors.t2, fontFamily: Typography.fontFamily.bodyMedium, fontSize: Typography.size.xs, letterSpacing: 1.2, textTransform: "uppercase", marginBottom: 3 },
+  screenTitle:   { fontFamily: Typography.fontFamily.display, fontSize: Typography.size.xl, color: Colors.t0 },
+  screenSubtitle:{ color: Colors.t1, fontFamily: Typography.fontFamily.body, fontSize: Typography.size.sm, lineHeight: 22, marginTop: Spacing.sm },
+  emptyHero:     { marginBottom: Spacing.xl },
+  sectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: Spacing.sm, marginTop: Spacing.md },
+  sectionLabel:  { color: Colors.t2, fontFamily: Typography.fontFamily.bodyMedium, fontSize: Typography.size.xs, letterSpacing: 1.0, textTransform: "uppercase" },
+  sectionNote:   { color: Colors.t3, fontFamily: Typography.fontFamily.body, fontSize: Typography.size.xs },
+  bottomPad:     { height: 100 },
+
+  card:      { backgroundColor: Colors.s1, borderColor: Colors.b1, borderRadius: Radius.lg, borderWidth: 0.5, padding: Spacing.lg, marginBottom: Spacing.md, ...Shadows.sm },
+  cardTitle: { color: Colors.t0, fontFamily: Typography.fontFamily.bodyMedium, fontSize: Typography.size.lg, marginBottom: Spacing.sm },
+  cardBody:  { color: Colors.t1, fontFamily: Typography.fontFamily.body, fontSize: Typography.size.sm, lineHeight: 22, marginBottom: Spacing.md },
+
+  heroCard:  { backgroundColor: Colors.s1, borderColor: Colors.b1, borderRadius: Radius.lg, borderWidth: 0.5, padding: Spacing.lg, marginBottom: Spacing.md, ...Shadows.md },
+  heroLabel: { color: Colors.t2, fontFamily: Typography.fontFamily.bodyMedium, fontSize: Typography.size.xs, letterSpacing: 0.8, textTransform: "uppercase", marginBottom: Spacing.xs },
+  heroValue: { color: Colors.t0, fontFamily: Typography.fontFamily.numeric, fontSize: Typography.size["2xl"], letterSpacing: -0.5, marginBottom: Spacing.sm },
+  tagRow:    { flexDirection: "row", gap: Spacing.sm, flexWrap: "wrap", marginBottom: Spacing.md },
+  tag:       { borderRadius: Radius.full, paddingHorizontal: Spacing.md, paddingVertical: 4 },
+  tagText:   { fontFamily: Typography.fontFamily.bodyMedium, fontSize: Typography.size.xs },
+  allocBar:    { flexDirection: "row", height: 6, borderRadius: Radius.full, overflow: "hidden", gap: 1, marginBottom: Spacing.sm },
+  allocSeg:    { height: "100%" },
+  allocLegend: { flexDirection: "row", flexWrap: "wrap", gap: Spacing.md },
+  allocItem:   { flexDirection: "row", alignItems: "center", gap: 5 },
+  allocDot:    { width: 6, height: 6, borderRadius: 3 },
+  allocText:   { color: Colors.t1, fontFamily: Typography.fontFamily.body, fontSize: Typography.size.xs },
+
+  refreshNavRow:         { flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderTopWidth: 0.5, borderTopColor: Colors.b0, marginTop: Spacing.md, paddingTop: Spacing.md, gap: Spacing.md },
+  refreshNavLeft:        { flex: 1 },
+  refreshNavTime:        { color: Colors.t2, fontFamily: Typography.fontFamily.body, fontSize: 10 },
+  refreshNavNote:        { color: Colors.teal, fontFamily: Typography.fontFamily.bodyMedium, fontSize: 10, marginTop: 2 },
+  refreshNavBtn:         { backgroundColor: Colors.teal, borderRadius: Radius.full, paddingHorizontal: Spacing.md, paddingVertical: 8, flexShrink: 0 },
+  refreshNavBtnDisabled: { opacity: 0.6 },
+  refreshNavBtnText:     { color: Colors.bg, fontFamily: Typography.fontFamily.bodyMedium, fontSize: Typography.size.xs },
+
+  uploadCard:        { backgroundColor: Colors.tealDim, borderColor: "rgba(31,190,114,0.22)", borderRadius: Radius.lg, borderWidth: 0.5, padding: Spacing.lg, marginBottom: Spacing.sm },
+  uploadTitle:       { color: Colors.t0, fontFamily: Typography.fontFamily.bodyMedium, fontSize: Typography.size.md, marginBottom: Spacing.xs },
+  uploadBody:        { color: Colors.teal, fontFamily: Typography.fontFamily.body, fontSize: Typography.size.xs, lineHeight: 18, marginBottom: Spacing.md },
+  uploadBtn:         { backgroundColor: Colors.teal, borderRadius: Radius.full, alignItems: "center", justifyContent: "center", paddingVertical: 11 },
+  uploadBtnDisabled: { opacity: 0.6 },
+  uploadBtnText:     { color: Colors.bg, fontFamily: Typography.fontFamily.bodyMedium, fontSize: Typography.size.sm },
+  scanPreview:       { width: "100%", height: 130, borderRadius: Radius.md, resizeMode: "cover", marginTop: Spacing.md },
+  parseNote:         { color: Colors.teal, fontFamily: Typography.fontFamily.bodyMedium, fontSize: Typography.size.xs, lineHeight: 18, marginTop: Spacing.sm },
+  addByCodeBtn:      { backgroundColor: Colors.s2, borderColor: Colors.b1, borderRadius: Radius.full, borderWidth: 0.5, alignItems: "center", justifyContent: "center", paddingVertical: 11, marginBottom: Spacing.md },
+  addByCodeText:     { color: Colors.gold, fontFamily: Typography.fontFamily.bodyMedium, fontSize: Typography.size.sm },
+
+  holdingList: { gap: Spacing.sm, marginBottom: Spacing.md },
+  holdingCard: { backgroundColor: Colors.s1, borderColor: Colors.b0, borderRadius: Radius.md, borderWidth: 0.5, flexDirection: "row", alignItems: "flex-start", gap: Spacing.md, padding: Spacing.md },
+  holdingDot:  { width: 8, height: 8, borderRadius: 2, marginTop: 4, flexShrink: 0 },
+  holdingBody: { flex: 1, minWidth: 0 },
+  holdingName: { color: Colors.t0, fontFamily: Typography.fontFamily.bodyMedium, fontSize: Typography.size.sm, marginBottom: 4, lineHeight: 20 },
+  holdingMeta: { flexDirection: "row", alignItems: "center", gap: Spacing.sm, flexWrap: "wrap" },
+  holdingCat:  { color: Colors.t2, fontFamily: Typography.fontFamily.bodyMedium, fontSize: Typography.size.xs, letterSpacing: 0.5, textTransform: "uppercase" },
+  schemeBadge:     { backgroundColor: Colors.s3, borderRadius: Radius.full, paddingHorizontal: Spacing.sm, paddingVertical: 2 },
+  schemeBadgeText: { color: Colors.t2, fontFamily: Typography.fontFamily.numeric, fontSize: 10 },
+  dateBadge:     { backgroundColor: Colors.tealDim, borderRadius: Radius.full, paddingHorizontal: Spacing.sm, paddingVertical: 2 },
+  dateBadgeWarn: { backgroundColor: Colors.amberDim },
+  dateBadgeText: { color: Colors.teal, fontFamily: Typography.fontFamily.bodyMedium, fontSize: 10 },
+  holdingRight:  { alignItems: "flex-end", flexShrink: 0 },
+  holdingValue:  { color: Colors.t0, fontFamily: Typography.fontFamily.numeric, fontSize: Typography.size.sm, marginBottom: 3 },
+  holdingXirr:   { fontFamily: Typography.fontFamily.numeric, fontSize: Typography.size.xs },
+
+  benchRow:     { flexDirection: "row", alignItems: "center", marginBottom: Spacing.md },
+  benchCol:     { flex: 1 },
+  benchDivider: { width: 0.5, height: 40, backgroundColor: Colors.b0, marginHorizontal: Spacing.sm },
+  benchLabel:   { color: Colors.t2, fontFamily: Typography.fontFamily.bodyMedium, fontSize: Typography.size.xs, letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 4 },
+  benchValue:   { color: Colors.t0, fontFamily: Typography.fontFamily.numeric, fontSize: Typography.size.xl },
+  benchNote:    { borderTopWidth: 0.5, borderTopColor: Colors.b0, paddingTop: Spacing.md },
+  benchNoteText:{ color: Colors.t2, fontFamily: Typography.fontFamily.body, fontSize: Typography.size.xs, lineHeight: 18 },
+
+  overlapList:   { gap: Spacing.sm, marginBottom: Spacing.md },
+  overlapCard:   { borderRadius: Radius.md, borderWidth: 0.5, padding: Spacing.md },
+  overlapHeader: { flexDirection: "row", alignItems: "center", gap: Spacing.sm, marginBottom: Spacing.xs, flexWrap: "wrap" },
+  overlapBadge:  { borderRadius: Radius.full, borderWidth: 0.5, paddingHorizontal: Spacing.sm, paddingVertical: 2 },
+  overlapLevel:  { fontFamily: Typography.fontFamily.bodyMedium, fontSize: 10, letterSpacing: 0.6 },
+  overlapFunds:  { color: Colors.t0, fontFamily: Typography.fontFamily.bodyMedium, fontSize: Typography.size.sm, flex: 1 },
+  overlapReason: { color: Colors.t1, fontFamily: Typography.fontFamily.body, fontSize: Typography.size.xs, lineHeight: 18 },
+
+  dragCard:  { backgroundColor: Colors.amberDim, borderColor: "rgba(217,142,56,0.22)", borderRadius: Radius.md, borderWidth: 0.5, padding: Spacing.md, marginBottom: Spacing.md },
+  dragLabel: { color: Colors.amber, fontFamily: Typography.fontFamily.bodyMedium, fontSize: 10, letterSpacing: 0.8, textTransform: "uppercase", marginBottom: Spacing.xs },
+  dragValue: { color: Colors.t0, fontFamily: Typography.fontFamily.numeric, fontSize: Typography.size.xl, marginBottom: Spacing.xs },
+  dragBody:  { color: Colors.t1, fontFamily: Typography.fontFamily.body, fontSize: Typography.size.xs, lineHeight: 18 },
+
+  planList:       { gap: Spacing.sm, marginBottom: Spacing.md },
+  tipCard:        { backgroundColor: Colors.s1, borderColor: Colors.b0, borderLeftColor: Colors.gold, borderLeftWidth: 2, borderTopRightRadius: Radius.md, borderBottomRightRadius: Radius.md, borderWidth: 0.5, flexDirection: "row", gap: Spacing.md, padding: Spacing.md },
+  tipNum:         { color: Colors.gold, fontFamily: Typography.fontFamily.numeric, fontSize: Typography.size.sm, flexShrink: 0 },
+  tipText:        { color: Colors.t1, fontFamily: Typography.fontFamily.body, fontSize: Typography.size.xs, lineHeight: 19, flex: 1 },
+  errorText:      { color: Colors.red, fontFamily: Typography.fontFamily.bodyMedium, fontSize: Typography.size.xs, marginBottom: Spacing.sm },
+  refreshBtn:     { borderColor: "rgba(133,114,224,0.25)", borderRadius: Radius.full, borderWidth: 0.5, paddingHorizontal: Spacing.md, paddingVertical: 4 },
+  refreshBtnText: { color: Colors.purple, fontFamily: Typography.fontFamily.bodyMedium, fontSize: Typography.size.xs },
+
+  shareRow:      { backgroundColor: Colors.s1, borderColor: Colors.b1, borderRadius: Radius.lg, borderWidth: 0.5, flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: Spacing.md, marginBottom: Spacing.md },
+  shareInfo:     { flex: 1 },
+  shareTitle:    { color: Colors.t0, fontFamily: Typography.fontFamily.bodyMedium, fontSize: Typography.size.sm, marginBottom: 2 },
+  shareSubtitle: { color: Colors.t2, fontFamily: Typography.fontFamily.body, fontSize: 10 },
+  shareBtn:      { backgroundColor: Colors.gold, borderRadius: Radius.full, paddingHorizontal: Spacing.lg, paddingVertical: 9, marginLeft: Spacing.md },
+  shareBtnText:  { color: Colors.bg, fontFamily: Typography.fontFamily.bodyMedium, fontSize: Typography.size.sm },
+
+  captureContainer: { left: -9999, position: "absolute", top: 0 },
+  captureCard:      { backgroundColor: Colors.s1, borderRadius: Radius.lg, borderWidth: 0.5, borderColor: Colors.b1, padding: 28, width: 340, gap: Spacing.sm },
+  captureBrand:     { color: Colors.t0, fontFamily: Typography.fontFamily.bodyMedium, fontSize: Typography.size.sm, marginBottom: Spacing.md },
+  captureValue:     { color: Colors.t0, fontFamily: Typography.fontFamily.numeric, fontSize: 40 },
+  captureLabel:     { color: Colors.t2, fontFamily: Typography.fontFamily.body, fontSize: Typography.size.xs },
+  captureDivider:   { backgroundColor: Colors.b1, height: 0.5, marginVertical: Spacing.md },
+  captureXirr:      { fontFamily: Typography.fontFamily.numeric, fontSize: Typography.size.xl },
 });

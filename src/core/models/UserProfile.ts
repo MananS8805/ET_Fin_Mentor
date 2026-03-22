@@ -128,11 +128,13 @@ export interface MonthlyMoneyCardData {
 export interface MFHolding {
   id: string;
   name: string;
+  schemeCode?: string;
   category: "large_cap" | "mid_cap" | "small_cap" | "elss" | "debt" | "hybrid" | "liquid" | "other";
   units: number;
   nav: number;
   currentValue: number;
   purchaseValue: number;
+  purchaseDate?: string;
   xirr: number | null; 
   transactions?: Array<{ date: Date; amount: number }>;// null if insufficient cashflow data
 }

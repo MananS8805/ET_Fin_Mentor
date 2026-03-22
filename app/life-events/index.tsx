@@ -198,7 +198,15 @@ function CalendarMonthChip({
         monthStyle,
       ]}
     >
-      <Text style={[styles.monthChipLabel, logged ? styles.monthChipLabelLogged : null]}>{label}</Text>
+      <Text
+        style={[
+          styles.monthChipLabel,
+          logged ? styles.monthChipLabelLogged : null,
+          isCurrent ? styles.monthChipLabelCurrent : null,
+        ]}
+      >
+        {label}
+      </Text>
     </Animated.View>
   );
 }
@@ -397,9 +405,9 @@ const [followUpLoading, setFollowUpLoading] = useState(false);
           ) : null}
           {adviceError ? <Text style={styles.warningText}>{adviceError}</Text> : null}
 
-          <AdviceSection accent={Colors.gold} body={immediateText} index={0} title="Immediate (0-30 days)" />
-          <AdviceSection accent={Colors.teal} body={soonText} index={1} title="Soon (1-6 months)" />
-          <AdviceSection accent={Colors.purple} body={longTermText} index={2} title="Long term" />
+          <AdviceSection accent={Colors.red} body={immediateText} index={0} title="Immediate (0-30 days)" />
+          <AdviceSection accent={Colors.amber} body={soonText} index={1} title="Soon (1-6 months)" />
+          <AdviceSection accent={Colors.teal} body={longTermText} index={2} title="Long term" />
         </View>
         {/* ── Follow-up Chat ── */}
 <View style={styles.followUpShell}>
@@ -528,7 +536,7 @@ const [followUpLoading, setFollowUpLoading] = useState(false);
             <Text style={styles.monthlyMetricValue}>{monthlyCard.emiPct.toFixed(0)}%</Text>
           </View>
           <View style={styles.monthlyTrack}>
-            <View style={[styles.monthlyFill, { width: `${monthlyCard.emiPct}%`, backgroundColor: Colors.gold }]} />
+            <View style={[styles.monthlyFill, { width: `${monthlyCard.emiPct}%`, backgroundColor: Colors.amber }]} />
           </View>
 
           <View style={styles.monthlyMetric}>
@@ -593,8 +601,8 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   title: {
-    color: "#FFFFFF",
-    fontFamily: Typography.fontFamily.displaySemiBold,
+    color: Colors.t0,
+    fontFamily: Typography.fontFamily.display,
     fontSize: 26,
   },
   subtitle: {
@@ -618,8 +626,8 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
   },
   eventCard: {
-    backgroundColor: "#1A1A1A",
-    borderColor: "#2A2A2A",
+    backgroundColor: Colors.s2,
+    borderColor: Colors.b0,
     borderRadius: 16,
     borderWidth: 0.5,
     gap: Spacing.sm,
@@ -628,12 +636,12 @@ const styles = StyleSheet.create({
     width: "48%",
   },
   eventCardActive: {
-    backgroundColor: "rgba(212,175,55,0.08)",
-    borderColor: "#D4AF37",
+    backgroundColor: Colors.goldDim,
+    borderColor: Colors.gold,
     borderWidth: 1,
   },
   eventActiveAccent: {
-    backgroundColor: "#D4AF37",
+    backgroundColor: Colors.gold,
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 3,
     borderTopLeftRadius: 0,
@@ -645,12 +653,12 @@ const styles = StyleSheet.create({
     width: 3,
   },
   eventLabel: {
-    color: "rgba(255,255,255,0.7)",
+    color: Colors.t1,
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: 14,
   },
   eventLabelActive: {
-    color: "#FFFFFF",
+    color: Colors.gold,
   },
   eventHelper: {
     color: "rgba(255,255,255,0.3)",
@@ -659,16 +667,16 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   responseShell: {
-    backgroundColor: "#1A1A1A",
-    borderColor: "#2A2A2A",
+    backgroundColor: Colors.s1,
+    borderColor: Colors.b1,
     borderRadius: 20,
     borderWidth: 0.5,
     gap: Spacing.md,
     padding: Spacing.xl,
   },
   responseTitle: {
-    color: "#FFFFFF",
-    fontFamily: Typography.fontFamily.displaySemiBold,
+    color: Colors.t0,
+    fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: 18,
   },
   loadingRow: {
@@ -680,13 +688,13 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
   loadingDot: {
-    color: "#7F77DD",
+    color: Colors.purple,
     fontFamily: Typography.fontFamily.displaySemiBold,
     fontSize: 16,
     marginRight: 1,
   },
   loadingText: {
-    color: "#7F77DD",
+    color: Colors.purple,
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.sm,
   },
@@ -715,22 +723,22 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   adviceTitle: {
-    color: "rgba(255,255,255,0.7)",
+    color: Colors.t2,
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: 13,
     marginBottom: 6,
   },
   adviceBody: {
-    color: "rgba(255,255,255,0.6)",
+    color: Colors.t1,
     fontFamily: Typography.fontFamily.body,
     fontSize: 14,
     lineHeight: 24,
   },
   streakHero: {
-    backgroundColor: "#0D1B35",
+    backgroundColor: Colors.s1,
     borderRadius: 20,
     borderWidth: 0.5,
-    borderColor: "rgba(255,255,255,0.06)",
+    borderColor: Colors.b1,
     gap: Spacing.md,
     padding: Spacing.xl,
   },
@@ -744,11 +752,11 @@ const styles = StyleSheet.create({
   },
   streakFlameCount: {
     color: Colors.gold,
-    fontFamily: Typography.fontFamily.displaySemiBold,
-    fontSize: 32,
+    fontFamily: Typography.fontFamily.numeric,
+    fontSize: 40,
   },
   streakBody: {
-    color: "rgba(255,255,255,0.6)",
+    color: Colors.t1,
     fontFamily: Typography.fontFamily.body,
     fontSize: Typography.size.sm,
     lineHeight: 20,
@@ -759,29 +767,29 @@ const styles = StyleSheet.create({
   },
   badge: {
     backgroundColor: "transparent",
-    borderColor: "rgba(255,255,255,0.1)",
+    borderColor: Colors.b1,
     borderRadius: Radius.full,
     borderWidth: 0.5,
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.sm,
   },
   badgeActive: {
-    backgroundColor: "rgba(212,175,55,0.12)",
-    borderColor: "rgba(212,175,55,0.3)",
+    backgroundColor: Colors.goldDim,
+    borderColor: "rgba(200,168,75,0.30)",
   },
   badgeLabel: {
-    color: "rgba(255,255,255,0.3)",
+    color: Colors.t3,
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.sm,
   },
   badgeLabelActive: {
-    color: "#D4AF37",
+    color: Colors.gold,
   },
   calendarCard: {
-    backgroundColor: "#1A1A1A",
+    backgroundColor: Colors.s1,
     borderRadius: 20,
     borderWidth: 0.5,
-    borderColor: "#2A2A2A",
+    borderColor: Colors.b0,
     gap: Spacing.md,
     padding: Spacing.xl,
   },
@@ -797,8 +805,8 @@ const styles = StyleSheet.create({
   },
   monthChip: {
     alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.03)",
-    borderColor: "rgba(255,255,255,0.06)",
+    backgroundColor: Colors.s2,
+    borderColor: Colors.b0,
     borderRadius: 12,
     borderWidth: 0.5,
     justifyContent: "center",
@@ -806,24 +814,27 @@ const styles = StyleSheet.create({
     width: "22%",
   },
   monthChipLogged: {
-    backgroundColor: "rgba(29,158,117,0.12)",
-    borderColor: "rgba(29,158,117,0.3)",
+    backgroundColor: Colors.tealDim,
+    borderColor: "rgba(31,190,114,0.25)",
   },
   monthChipCurrent: {
     borderColor: Colors.gold,
     borderWidth: 1,
   },
   monthChipLabel: {
-    color: "rgba(255,255,255,0.25)",
+    color: Colors.t3,
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.sm,
   },
   monthChipLabelLogged: {
-    color: "#1D9E75",
+    color: Colors.teal,
+  },
+  monthChipLabelCurrent: {
+    color: Colors.gold,
   },
   monthlyCard: {
-    backgroundColor: "rgba(212,175,55,0.05)",
-    borderColor: "rgba(212,175,55,0.2)",
+    backgroundColor: Colors.goldDim,
+    borderColor: "rgba(200,168,75,0.20)",
     borderRadius: 20,
     borderWidth: 0.5,
     gap: Spacing.md,
@@ -835,7 +846,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   monthlyTitle: {
-    color: "#FFFFFF",
+    color: Colors.t0,
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.lg,
   },
@@ -846,7 +857,7 @@ const styles = StyleSheet.create({
     marginTop: Spacing.xs,
   },
   monthlyBody: {
-    color: "rgba(255,255,255,0.6)",
+    color: Colors.t1,
     fontFamily: Typography.fontFamily.body,
     fontSize: Typography.size.sm,
     lineHeight: 22,
@@ -857,13 +868,13 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   monthlyMetricLabel: {
-    color: "#FFFFFF",
+    color: Colors.t0,
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.sm,
   },
   monthlyMetricValue: {
-    color: "#FFFFFF",
-    fontFamily: Typography.fontFamily.displaySemiBold,
+    color: Colors.t0,
+    fontFamily: Typography.fontFamily.numeric,
     fontSize: Typography.size.md,
   },
   monthlyTrack: {
@@ -970,7 +981,7 @@ const styles = StyleSheet.create({
     marginTop: Spacing.md,
   },
   followUpTitle: {
-    color: "#FFFFFF",
+    color: Colors.t0,
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: 16,
   },
@@ -982,12 +993,12 @@ const styles = StyleSheet.create({
   },
   followUpInputRow: {
     borderWidth: 0.5,
-    borderColor: "#2A2A2A",
+    borderColor: Colors.b0,
     borderRadius: 14,
-    backgroundColor: "#0D0D0D",
+    backgroundColor: Colors.s2,
   },
   followUpInput: {
-    color: "#FFFFFF",
+    color: Colors.t0,
     fontFamily: Typography.fontFamily.body,
     fontSize: Typography.size.md,
     minHeight: 80,
@@ -996,7 +1007,7 @@ const styles = StyleSheet.create({
   },
   followUpBtn: {
     alignItems: "center",
-    backgroundColor: "#7F77DD",
+    backgroundColor: Colors.purple,
     borderRadius: Radius.full,
     justifyContent: "center",
     minHeight: 48,
@@ -1006,7 +1017,7 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   followUpBtnText: {
-    color: "#FFFFFF",
+    color: Colors.t0,
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.md,
   },
@@ -1019,7 +1030,7 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   followUpReplyLabel: {
-    color: "#7F77DD",
+    color: Colors.purple,
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.xs,
     textTransform: "uppercase",

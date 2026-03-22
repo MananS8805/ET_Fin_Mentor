@@ -98,7 +98,7 @@ function AuthActionButton({
         ]}
       >
         {loading ? (
-          <ActivityIndicator color={isPrimary ? "#0A0A0A" : Colors.white} />
+          <ActivityIndicator color={isPrimary ? Colors.bg : Colors.white} />
         ) : (
           <Text style={[styles.buttonText, isPrimary ? styles.primaryButtonText : styles.secondaryButtonText]}>{label}</Text>
         )}
@@ -572,7 +572,7 @@ export default function AuthScreen() {
 
 const styles = StyleSheet.create({
   safeArea: {
-    backgroundColor: "#060610",
+    backgroundColor: Colors.bg,
     flex: 1,
   },
   flex: {
@@ -667,8 +667,8 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   warningCard: {
-    backgroundColor: "rgba(245,166,35,0.14)",
-    borderColor: "rgba(245,166,35,0.28)",
+    backgroundColor: Colors.amberDim,
+    borderColor: "rgba(217,142,56,0.28)",
     borderRadius: 14,
     borderWidth: 0.5,
     gap: Spacing.sm,
@@ -686,8 +686,8 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   errorCard: {
-    backgroundColor: "rgba(226,75,74,0.12)",
-    borderColor: "rgba(226,75,74,0.3)",
+    backgroundColor: Colors.redDim,
+    borderColor: "rgba(220,78,78,0.30)",
     borderRadius: 14,
     borderWidth: 0.5,
     padding: Spacing.lg,
@@ -775,7 +775,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   primaryButtonText: {
-    color: "#0A0A0A",
+    color: Colors.bg,
   },
   secondaryButtonText: {
     color: "rgba(255,255,255,0.7)",

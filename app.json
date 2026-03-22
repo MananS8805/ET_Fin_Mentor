@@ -24,7 +24,8 @@
           "microphonePermission": "Allow ET FinMentor to access your microphone for voice money check-ins.",
           "speechRecognitionPermission": "Allow ET FinMentor to securely recognize your speech for voice money check-ins."
         }
-      ]
+      ],
+      "expo-font"
     ],
     "android": {
       "package": "com.et.finmentor",
