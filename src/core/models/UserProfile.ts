@@ -135,8 +135,8 @@ export interface MFHolding {
   currentValue: number;
   purchaseValue: number;
   purchaseDate?: string;
-  xirr: number | null; 
-  transactions?: Array<{ date: Date; amount: number }>;// null if insufficient cashflow data
+  xirr: number | null;
+  transactions?: Array<{ date: Date; amount: number }>;
 }
 
 export interface OverlapPair {
@@ -152,8 +152,8 @@ export interface PortfolioXRay {
   totalInvested: number;
   overallXIRR: number | null;
   overlapPairs: OverlapPair[];
-  expenseRatioDrag: number;   // annual ₹ lost vs index equivalent
-  categoryAllocation: Record<MFHolding["category"], number>; // percentage per category
+  expenseRatioDrag: number;
+  categoryAllocation: Record<MFHolding["category"], number>;
 }
 
 export interface SipCalendarMonth {
@@ -236,8 +236,8 @@ export interface JointHomeLoan {
 export interface JointPortfolioSummary {
   combinedCorpus: number;
   combinedSIP: number;
-  userLTCG: number; // current unrealized LTCG for user
-  partnerLTCG: number; // current unrealized LTCG for partner
+  userLTCG: number;
+  partnerLTCG: number;
 }
 
 export interface JointProfileData {
@@ -282,8 +282,6 @@ export interface JointOptimizationResult {
   };
 }
 
-
-
 const HEALTH_DIMENSION_LABELS: Record<HealthDimensionKey, string> = {
   emergency: "Emergency",
   insurance: "Insurance",
@@ -304,6 +302,10 @@ export const LIFE_EVENT_OPTIONS: LifeEventOption[] = [
   { key: "buy-home", label: "Buy home", helper: "Pressure-test EMI, down payment, and safety buffer." },
 ] as const;
 
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
 function roundToTwo(value: number): number {
   return Number(value.toFixed(2));
 }
@@ -321,7 +323,7 @@ function clampPercent(value: number): number {
 }
 
 function safeAnnualIncome(profile: UserProfileData): number {
-  return profile.annualIncome > 0 ? profile.annualIncome : profile.monthlyIncome * 12;
+  return (profile.annualIncome ?? 0) > 0 ? profile.annualIncome : profile.monthlyIncome * 12;
 }
 
 function formatMonthLabel(date: Date): string {
@@ -347,95 +349,44 @@ function getBaseEquityAllocation(riskProfile: RiskProfile): number {
 function getLiquidityNeed(profile: UserProfileData): TaxLiquidity {
   const emergencyMonths = getEmergencyFundMonths(profile);
   const debtRatio = getDebtToIncomeRatio(profile);
-
-  if (emergencyMonths < 4 || debtRatio > 35) {
-    return "high";
-  }
-
-  if (emergencyMonths < 6 || debtRatio > 20) {
-    return "medium";
-  }
-
+  if (emergencyMonths < 4 || debtRatio > 35) return "high";
+  if (emergencyMonths < 6 || debtRatio > 20) return "medium";
   return "low";
 }
 
 function getRiskAlignmentScore(profileRisk: RiskProfile, recommendationRisk: RiskProfile): number {
-  if (profileRisk === recommendationRisk) {
-    return 3;
-  }
-
-  if (profileRisk === "moderate") {
-    return recommendationRisk === "aggressive" ? 2 : 2.5;
-  }
-
-  if (profileRisk === "conservative") {
-    return recommendationRisk === "moderate" ? 1.5 : 0.5;
-  }
-
+  if (profileRisk === recommendationRisk) return 3;
+  if (profileRisk === "moderate") return recommendationRisk === "aggressive" ? 2 : 2.5;
+  if (profileRisk === "conservative") return recommendationRisk === "moderate" ? 1.5 : 0.5;
   return recommendationRisk === "moderate" ? 2.5 : 1;
 }
 
-function getLiquidityAlignmentScore(
-  liquidityNeed: TaxLiquidity,
-  recommendationLiquidity: TaxLiquidity
-): number {
+function getLiquidityAlignmentScore(liquidityNeed: TaxLiquidity, recommendationLiquidity: TaxLiquidity): number {
   if (liquidityNeed === "high") {
-    if (recommendationLiquidity === "high") {
-      return 3;
-    }
-
-    if (recommendationLiquidity === "medium") {
-      return 2;
-    }
-
+    if (recommendationLiquidity === "high") return 3;
+    if (recommendationLiquidity === "medium") return 2;
     return 0.5;
   }
-
   if (liquidityNeed === "medium") {
-    if (recommendationLiquidity === "medium") {
-      return 3;
-    }
-
-    if (recommendationLiquidity === "high") {
-      return 2.5;
-    }
-
+    if (recommendationLiquidity === "medium") return 3;
+    if (recommendationLiquidity === "high") return 2.5;
     return 1.5;
   }
-
-  if (recommendationLiquidity === "low") {
-    return 3;
-  }
-
-  if (recommendationLiquidity === "medium") {
-    return 2;
-  }
-
+  if (recommendationLiquidity === "low") return 3;
+  if (recommendationLiquidity === "medium") return 2;
   return 1;
 }
 
 function applySlabs(taxableIncome: number, slabs: ReadonlyArray<{ upto: number; rate: number }>): number {
-  if (taxableIncome <= 0) {
-    return 0;
-  }
-
+  if (taxableIncome <= 0) return 0;
   let tax = 0;
   let previousLimit = 0;
-
   for (const slab of slabs) {
-    if (taxableIncome <= previousLimit) {
-      break;
-    }
-
+    if (taxableIncome <= previousLimit) break;
     const taxableAmount = Math.min(taxableIncome, slab.upto) - previousLimit;
-
-    if (taxableAmount > 0) {
-      tax += taxableAmount * slab.rate;
-    }
-
+    if (taxableAmount > 0) tax += taxableAmount * slab.rate;
     previousLimit = slab.upto;
   }
-
   return roundToTwo(tax);
 }
 
@@ -446,15 +397,15 @@ function trimTrailingZero(value: string): string {
 function formatIndianDigits(value: number): string {
   const absolute = Math.round(Math.abs(value));
   const digits = absolute.toString();
-
-  if (digits.length <= 3) {
-    return digits;
-  }
-
+  if (digits.length <= 3) return digits;
   const lastThree = digits.slice(-3);
   const otherDigits = digits.slice(0, -3).replace(/\B(?=(\d{2})+(?!\d))/g, ",");
   return `${otherDigits},${lastThree}`;
 }
+
+// ---------------------------------------------------------------------------
+// Profile factories
+// ---------------------------------------------------------------------------
 
 export function createEmptyUserProfile(overrides: Partial<UserProfileData> = {}): UserProfileData {
   return {
@@ -490,7 +441,6 @@ export function createTaxWizardInput(
   overrides: Partial<TaxWizardInput> = {}
 ): TaxWizardInput {
   const annualIncome = overrides.annualIncome ?? safeAnnualIncome(profile);
-
   return {
     annualIncome,
     basicSalary: overrides.basicSalary ?? roundToTwo(annualIncome * 0.4),
@@ -503,23 +453,21 @@ export function createTaxWizardInput(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Basic financial getters
+// ---------------------------------------------------------------------------
+
 export function getMonthlySavings(profile: UserProfileData): number {
   return roundToTwo(profile.monthlyIncome - profile.monthlyExpenses - profile.monthlyEMI);
 }
 
 export function getSavingsRate(profile: UserProfileData): number {
-  if (profile.monthlyIncome <= 0) {
-    return 0;
-  }
-
+  if (profile.monthlyIncome <= 0) return 0;
   return roundToTwo((getMonthlySavings(profile) / profile.monthlyIncome) * 100);
 }
 
 export function getEmergencyFundMonths(profile: UserProfileData): number {
-  if (profile.monthlyExpenses <= 0) {
-    return 0;
-  }
-
+  if (profile.monthlyExpenses <= 0) return 0;
   return roundToTwo(profile.emergencyFund / profile.monthlyExpenses);
 }
 
@@ -529,11 +477,7 @@ export function getRecommendedEmergencyFund(profile: UserProfileData): number {
 
 export function getInsuranceMultiple(profile: UserProfileData): number {
   const annualIncome = safeAnnualIncome(profile);
-
-  if (annualIncome <= 0) {
-    return 0;
-  }
-
+  if (annualIncome <= 0) return 0;
   return roundToTwo(profile.termInsuranceCover / annualIncome);
 }
 
@@ -541,8 +485,16 @@ export function getInsuranceGap(profile: UserProfileData): number {
   return roundToTwo(Math.max(0, safeAnnualIncome(profile) * 10 - profile.termInsuranceCover));
 }
 
-export function getFireCorpusTarget(profile: UserProfileData): number {
-  return roundToTwo(profile.targetMonthlyExpenseRetirement * 12 * 25);
+// ---------------------------------------------------------------------------
+// FIX 1 — FIRE corpus target with inflation adjustment
+// Previously: expense * 12 * 25 (no inflation — understated target by 5-6x)
+// Now:        inflate expense to retirement date at 6% p.a., then apply 25x
+// ---------------------------------------------------------------------------
+export function getFireCorpusTarget(profile: UserProfileData, inflationRate = 0.06): number {
+  const years = Math.max(0, profile.retirementAge - profile.age);
+  const inflatedMonthlyExpense =
+    profile.targetMonthlyExpenseRetirement * Math.pow(1 + inflationRate, years);
+  return roundToTwo(inflatedMonthlyExpense * 12 * 25);
 }
 
 export function projectedCorpusAtAge(
@@ -551,11 +503,7 @@ export function projectedCorpusAtAge(
   cagr = 0.12
 ): number {
   const years = Math.max(0, targetAge - profile.age);
-
-  if (years === 0) {
-    return roundToTwo(profile.existingCorpus);
-  }
-
+  if (years === 0) return roundToTwo(profile.existingCorpus);
   const months = years * 12;
   const monthlyRate = cagr / 12;
   const fvLump = profile.existingCorpus * Math.pow(1 + cagr, years);
@@ -563,7 +511,6 @@ export function projectedCorpusAtAge(
     monthlyRate === 0
       ? profile.monthlySIP * months
       : profile.monthlySIP * (((Math.pow(1 + monthlyRate, months) - 1) / monthlyRate) * (1 + monthlyRate));
-
   return roundToTwo(fvLump + fvSip);
 }
 
@@ -574,11 +521,7 @@ export function sipNeededFor(
   cagr = 0.12
 ): number {
   const years = Math.max(0, targetAge - profile.age);
-
-  if (years === 0) {
-    return 0;
-  }
-
+  if (years === 0) return 0;
   const futureValueFromCorpus = profile.existingCorpus * Math.pow(1 + cagr, years);
   const remainingTarget = Math.max(0, targetCorpus - futureValueFromCorpus);
   const months = years * 12;
@@ -587,11 +530,7 @@ export function sipNeededFor(
     monthlyRate === 0
       ? months
       : ((Math.pow(1 + monthlyRate, months) - 1) / monthlyRate) * (1 + monthlyRate);
-
-  if (annuityFactor <= 0) {
-    return 0;
-  }
-
+  if (annuityFactor <= 0) return 0;
   return roundToTwo(remainingTarget / annuityFactor);
 }
 
@@ -603,7 +542,7 @@ export interface GoalSIPAllocation {
 }
 
 const GOAL_HORIZON_YEARS: Record<string, number> = {
-  retirement: 0,          // uses yearsToRetirement
+  retirement: 0,
   "buy a home": 5,
   "children education": 15,
   "parents care fund": 10,
@@ -613,24 +552,27 @@ const GOAL_HORIZON_YEARS: Record<string, number> = {
   "wealth creation": 20,
 };
 
+// ---------------------------------------------------------------------------
+// FIX 6 — SIP allocation weighting
+// Previously: weight = 1/horizonYears (shorter goals got more SIP — backwards)
+// Now:        weight = horizonYears (longer goals get more SIP — compounding
+//             works harder over longer periods, retirement deserves the largest slice)
+// ---------------------------------------------------------------------------
 export function getSIPAllocationByGoal(profile: UserProfileData): GoalSIPAllocation[] {
   if (!profile.goals.length || profile.monthlySIP <= 0) return [];
-
   const yearsToRetirement = Math.max(1, profile.retirementAge - profile.age);
-
   const goalsWithHorizon = profile.goals.map((goal) => ({
     goal,
     horizonYears: goal === "retirement" ? yearsToRetirement : (GOAL_HORIZON_YEARS[goal] ?? 10),
   }));
-
-  // Weight SIP allocation inversely by horizon — shorter goals get more monthly SIP
-  const totalWeight = goalsWithHorizon.reduce((sum, g) => sum + 1 / g.horizonYears, 0);
-
+  const totalWeight = goalsWithHorizon.reduce((sum, g) => sum + g.horizonYears, 0);
   return goalsWithHorizon.map(({ goal, horizonYears }) => {
-    const weight = 1 / horizonYears / totalWeight;
+    const weight = horizonYears / totalWeight;
     const sipAmount = roundToTwo(profile.monthlySIP * weight);
+    const monthlyRate = 0.12 / 12;
+    const months = horizonYears * 12;
     const targetCorpus = roundToTwo(
-      sipAmount * (((Math.pow(1.12, horizonYears) - 1) / (0.12 / 12)) * (1 + 0.12 / 12))
+      sipAmount * (((Math.pow(1 + monthlyRate, months) - 1) / monthlyRate) * (1 + monthlyRate))
     );
     return { goal, sipAmount, targetCorpus, horizonYears };
   });
@@ -658,7 +600,6 @@ export function projectedCorpusForScenario(
     ...profile,
     monthlySIP: roundToTwo(profile.monthlySIP * sipMultiplier),
   });
-
   return projectedCorpusAtAge(scenarioProfile, targetAge, cagr);
 }
 
@@ -670,15 +611,10 @@ export function getFutureProjectionPoints(
 ): FutureProjectionPoint[] {
   const points = new Set<number>();
   const chartStartAge = Math.min(70, Math.max(profile.age + 5, profile.age));
-
-  for (let age = chartStartAge; age <= 70; age += 5) {
-    points.add(age);
-  }
-
+  for (let age = chartStartAge; age <= 70; age += 5) points.add(age);
   points.add(selectedAge);
-
   return Array.from(points)
-    .sort((left, right) => left - right)
+    .sort((a, b) => a - b)
     .map((age) => ({
       age,
       corpus: projectedCorpusForScenario(profile, age, sipMultiplier, cagr),
@@ -693,7 +629,6 @@ export function getFutureMilestones(
   const emergencyTarget = getRecommendedEmergencyFund(profile);
   const fireTarget = getFireCorpusTarget(profile);
   const halfFireTarget = fireTarget * 0.5;
-
   return [
     {
       key: "emergency",
@@ -735,24 +670,11 @@ export function getFutureYouFallbackNarrative(
 ): string {
   const passiveIncome = getMonthlyPassiveIncome(projectedCorpus);
   const scenarioSip = roundToTwo(profile.monthlySIP * sipMultiplier);
-
   if (fireTarget > 0 && projectedCorpus >= fireTarget) {
-    return `By age ${targetAge}, this path projects about ${formatINR(
-      projectedCorpus
-    )}, which can support roughly ${formatINR(
-      passiveIncome
-    )} a month using the 4% rule. Your current SIP pace of ${formatINR(
-      scenarioSip
-    )} keeps you on a FIRE-ready trajectory if you stay near ${(cagr * 100).toFixed(0)}% CAGR.`;
+    return `By age ${targetAge}, this path projects about ${formatINR(projectedCorpus)}, which can support roughly ${formatINR(passiveIncome)} a month using the 4% rule. Your current SIP pace of ${formatINR(scenarioSip)} keeps you on a FIRE-ready trajectory if you stay near ${(cagr * 100).toFixed(0)}% CAGR.`;
   }
-
   const gap = Math.max(0, fireTarget - projectedCorpus);
-
-  return `By age ${targetAge}, this scenario points to about ${formatINR(
-    projectedCorpus
-  )}, leaving a gap of ${formatINR(gap, true)} to your FIRE goal. Moving your SIP toward ${formatINR(
-    scenarioSip
-  )} and staying invested near ${(cagr * 100).toFixed(0)}% CAGR meaningfully improves the odds.`;
+  return `By age ${targetAge}, this scenario points to about ${formatINR(projectedCorpus)}, leaving a gap of ${formatINR(gap, true)} to your FIRE goal. Moving your SIP toward ${formatINR(scenarioSip)} and staying invested near ${(cagr * 100).toFixed(0)}% CAGR meaningfully improves the odds.`;
 }
 
 export function getFireProjectionSeries(
@@ -769,7 +691,6 @@ export function getFireProjectionSeries(
   const targetCorpus = getFireCorpusTarget(plannerProfile);
   const finalAge = Math.max(profile.age, targetRetirementAge);
   const series: FireProjectionPoint[] = [];
-
   for (let age = profile.age; age <= finalAge; age += 1) {
     series.push({
       age,
@@ -777,15 +698,9 @@ export function getFireProjectionSeries(
       targetCorpus,
     });
   }
-
   if (!series.length) {
-    series.push({
-      age: profile.age,
-      projectedCorpus: profile.existingCorpus,
-      targetCorpus,
-    });
+    series.push({ age: profile.age, projectedCorpus: profile.existingCorpus, targetCorpus });
   }
-
   return series;
 }
 
@@ -795,16 +710,10 @@ export function estimateFireAge(
   cagr = 0.12,
   maxAge = 75
 ): number | null {
-  if (targetCorpus <= 0) {
-    return profile.age;
-  }
-
+  if (targetCorpus <= 0) return profile.age;
   for (let age = profile.age; age <= maxAge; age += 1) {
-    if (projectedCorpusAtAge(profile, age, cagr) >= targetCorpus) {
-      return age;
-    }
+    if (projectedCorpusAtAge(profile, age, cagr) >= targetCorpus) return age;
   }
-
   return null;
 }
 
@@ -839,7 +748,6 @@ export function getFireAssetAllocationSchedule(
       },
     ];
   }
-
   if (yearsLeft <= 10) {
     return [
       {
@@ -858,7 +766,6 @@ export function getFireAssetAllocationSchedule(
       },
     ];
   }
-
   return [
     {
       label: `Age ${profile.age} to ${targetRetirementAge - 10}`,
@@ -903,7 +810,6 @@ export function getFinancial911Alerts(profile: UserProfileData): FinancialAlert[
       priority: "critical",
     });
   }
-
   if (insuranceMultiple < 8) {
     alerts.push({
       id: "term_cover_low",
@@ -913,7 +819,6 @@ export function getFinancial911Alerts(profile: UserProfileData): FinancialAlert[
       priority: "critical",
     });
   }
-
   if (profile.monthlySIP === 0) {
     alerts.push({
       id: "sip_missing",
@@ -923,7 +828,6 @@ export function getFinancial911Alerts(profile: UserProfileData): FinancialAlert[
       priority: "high",
     });
   }
-
   if (used80C < 100_000) {
     alerts.push({
       id: "unused_80c",
@@ -933,7 +837,6 @@ export function getFinancial911Alerts(profile: UserProfileData): FinancialAlert[
       priority: "high",
     });
   }
-
   if (insuranceGap > 5_000_000) {
     alerts.push({
       id: "insurance_gap_high",
@@ -943,7 +846,6 @@ export function getFinancial911Alerts(profile: UserProfileData): FinancialAlert[
       priority: "critical",
     });
   }
-
   if (debtRatio > 40) {
     alerts.push({
       id: "debt_ratio_high",
@@ -953,7 +855,6 @@ export function getFinancial911Alerts(profile: UserProfileData): FinancialAlert[
       priority: "critical",
     });
   }
-
   if (profile.healthInsuranceCover <= 0) {
     alerts.push({
       id: "health_cover_missing",
@@ -963,7 +864,6 @@ export function getFinancial911Alerts(profile: UserProfileData): FinancialAlert[
       priority: "critical",
     });
   }
-
   if (fireTarget > 0 && retirementProgress < 0.1) {
     alerts.push({
       id: "retirement_corpus_low",
@@ -973,7 +873,6 @@ export function getFinancial911Alerts(profile: UserProfileData): FinancialAlert[
       priority: "high",
     });
   }
-
   return alerts;
 }
 
@@ -1076,7 +975,6 @@ export function getLifeEventFallbackAdvice(profile: UserProfileData, event: Life
 export function getMonthlyMoneyCardData(profile: UserProfileData, date = new Date()): MonthlyMoneyCardData {
   const income = Math.max(profile.monthlyIncome, 1);
   const monthlySavings = Math.max(0, getMonthlySavings(profile));
-
   return {
     monthLabel: formatMonthLabel(date),
     expensePct: clampPercent((profile.monthlyExpenses / income) * 100),
@@ -1093,30 +991,28 @@ export function getMonthKey(date = new Date()): string {
 }
 
 export function getRecentMonthKeys(count = 12, referenceDate = new Date()): string[] {
-  return Array.from({ length: count }, (_, index) => getMonthKey(shiftMonth(referenceDate, -(count - index - 1))));
+  return Array.from({ length: count }, (_, index) =>
+    getMonthKey(shiftMonth(referenceDate, -(count - index - 1)))
+  );
 }
 
 export function getSipStreakCount(logs: string[], referenceDate = new Date()): number {
   const logSet = new Set(logs);
   let streak = 0;
   let cursor = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), 1);
-
   while (logSet.has(getMonthKey(cursor))) {
     streak += 1;
     cursor = shiftMonth(cursor, -1);
   }
-
   return streak;
 }
 
 export function getSipCalendar(logs: string[], count = 12, referenceDate = new Date()): SipCalendarMonth[] {
   const logSet = new Set(logs);
   const currentKey = getMonthKey(referenceDate);
-
   return getRecentMonthKeys(count, referenceDate).map((key) => {
     const [yearString, monthString] = key.split("-");
     const date = new Date(Number(yearString), Number(monthString) - 1, 1);
-
     return {
       key,
       label: MONTH_NAMES[date.getMonth()],
@@ -1127,62 +1023,43 @@ export function getSipCalendar(logs: string[], count = 12, referenceDate = new D
 }
 
 export function getSipMilestone(streak: number): 3 | 6 | 12 | null {
-  if (streak >= 12) {
-    return 12;
-  }
-
-  if (streak >= 6) {
-    return 6;
-  }
-
-  if (streak >= 3) {
-    return 3;
-  }
-
+  if (streak >= 12) return 12;
+  if (streak >= 6) return 6;
+  if (streak >= 3) return 3;
   return null;
 }
 
-// Newton-Raphson XIRR — pure TS, no library needed
 export function calculateXIRR(
   cashflows: Array<{ date: Date; amount: number }>,
   guess = 0.1
 ): number | null {
   if (cashflows.length < 2) return null;
-
   const first = cashflows[0].date.getTime();
   const years = cashflows.map((cf) => (cf.date.getTime() - first) / (365.25 * 24 * 3600 * 1000));
-
   let rate = guess;
-
   for (let i = 0; i < 100; i++) {
     let npv = 0;
     let dNpv = 0;
-
     for (let j = 0; j < cashflows.length; j++) {
       const factor = Math.pow(1 + rate, years[j]);
       npv += cashflows[j].amount / factor;
       dNpv -= (years[j] * cashflows[j].amount) / (factor * (1 + rate));
     }
-
     if (Math.abs(dNpv) < 1e-10) break;
     const next = rate - npv / dNpv;
-    if (Math.abs(next - rate) < 1e-7) return roundToTwo(next * 100); // return as %
+    if (Math.abs(next - rate) < 1e-7) return roundToTwo(next * 100);
     rate = next;
   }
-
   return roundToTwo(rate * 100);
 }
 
-// Category-based overlap detection — no external data needed
 export function getOverlapPairs(holdings: MFHolding[]): OverlapPair[] {
   const pairs: OverlapPair[] = [];
   const highOverlapCategories: Array<MFHolding["category"]> = ["large_cap", "elss"];
-
   for (let i = 0; i < holdings.length; i++) {
     for (let j = i + 1; j < holdings.length; j++) {
       const a = holdings[i];
       const b = holdings[j];
-
       if (a.category === b.category && highOverlapCategories.includes(a.category)) {
         pairs.push({
           fund1: a.name,
@@ -1203,46 +1080,34 @@ export function getOverlapPairs(holdings: MFHolding[]): OverlapPair[] {
       }
     }
   }
-
   return pairs;
 }
 
-// Weighted expense ratio drag vs a 0.1% index fund
 export function getExpenseRatioDrag(holdings: MFHolding[]): number {
   const total = holdings.reduce((sum, h) => sum + h.currentValue, 0);
   if (total === 0) return 0;
-
-  // Typical category expense ratios (direct plan averages)
   const avgExpenseRatio: Record<MFHolding["category"], number> = {
     large_cap: 0.95, mid_cap: 1.2, small_cap: 1.4,
     elss: 1.1, debt: 0.5, hybrid: 1.0, liquid: 0.2, other: 1.0,
   };
-
-  const weightedRatio = holdings.reduce((sum, h) => {
-    return sum + (h.currentValue / total) * avgExpenseRatio[h.category];
-  }, 0);
-
-  const indexRatio = 0.1;
-  const dragPercent = Math.max(0, weightedRatio - indexRatio);
+  const weightedRatio = holdings.reduce((sum, h) => sum + (h.currentValue / total) * avgExpenseRatio[h.category], 0);
+  const dragPercent = Math.max(0, weightedRatio - 0.1);
   return roundToTwo((dragPercent / 100) * total);
 }
 
 export function getCategoryAllocation(holdings: MFHolding[]): PortfolioXRay["categoryAllocation"] {
   const total = holdings.reduce((sum, h) => sum + h.currentValue, 0);
   const alloc: Partial<PortfolioXRay["categoryAllocation"]> = {};
-
   for (const h of holdings) {
-    alloc[h.category] = roundToTwo(((alloc[h.category] ?? 0) + (total > 0 ? (h.currentValue / total) * 100 : 0)));
+    alloc[h.category] = roundToTwo(
+      ((alloc[h.category] ?? 0) + (total > 0 ? (h.currentValue / total) * 100 : 0))
+    );
   }
-
   return alloc as PortfolioXRay["categoryAllocation"];
 }
 
 export function getDebtToIncomeRatio(profile: UserProfileData): number {
-  if (profile.monthlyIncome <= 0) {
-    return 0;
-  }
-
+  if (profile.monthlyIncome <= 0) return 0;
   return roundToTwo((profile.monthlyEMI / profile.monthlyIncome) * 100);
 }
 
@@ -1256,42 +1121,23 @@ export function getHealthScoreDimensions(profile: UserProfileData): HealthScoreD
   const tax = clampScore(Math.min(taxBase / 150_000, 1) * 100);
   const fireTarget = getFireCorpusTarget(profile);
   const retirement = clampScore(Math.min(fireTarget === 0 ? 0 : profile.existingCorpus / fireTarget, 1) * 100);
-
-  return {
-    emergency,
-    insurance,
-    investment,
-    debt,
-    tax,
-    retirement,
-  };
+  return { emergency, insurance, investment, debt, tax, retirement };
 }
 
 export function getOverallHealthScore(profile: UserProfileData): number {
   const dimensions = Object.values(getHealthScoreDimensions(profile));
-  const total = dimensions.reduce((sum, item) => sum + item, 0);
-  return roundToTwo(total / dimensions.length);
+  return roundToTwo(dimensions.reduce((sum, item) => sum + item, 0) / dimensions.length);
 }
 
 export function getHealthScoreCategory(score: number): HealthScoreCategory {
-  if (score < 40) {
-    return "Critical";
-  }
-
-  if (score <= 60) {
-    return "Needs Work";
-  }
-
-  if (score <= 80) {
-    return "Good";
-  }
-
+  if (score < 40) return "Critical";
+  if (score <= 60) return "Needs Work";
+  if (score <= 80) return "Good";
   return "Excellent";
 }
 
 export function getHealthDimensionDetails(profile: UserProfileData): HealthDimensionDetail[] {
   const dimensions = getHealthScoreDimensions(profile);
-
   return (Object.entries(dimensions) as Array<[HealthDimensionKey, number]>).map(([key, score]) => ({
     key,
     label: HEALTH_DIMENSION_LABELS[key],
@@ -1305,7 +1151,6 @@ export function getHealthShareInsights(profile: UserProfileData): string[] {
   const retirementTarget = getFireCorpusTarget(profile);
   const retirementProgress =
     retirementTarget > 0 ? Math.min((profile.existingCorpus / retirementTarget) * 100, 100) : 0;
-
   return [
     `Emergency ready: ${emergencyMonths.toFixed(1)}/6 months covered`,
     `Protection cover: ${insuranceMultiple.toFixed(1)}x annual income`,
@@ -1315,40 +1160,26 @@ export function getHealthShareInsights(profile: UserProfileData): string[] {
 
 export function getHealthImprovementFallback(profile: UserProfileData): string[] {
   const sortedDimensions = getHealthDimensionDetails(profile)
-    .sort((left, right) => left.score - right.score)
+    .sort((a, b) => a.score - b.score)
     .slice(0, 3);
-
   return sortedDimensions.map((dimension) => {
     switch (dimension.key) {
       case "emergency":
-        return `Build your emergency fund from ${formatINR(profile.emergencyFund)} to ${formatINR(
-          getRecommendedEmergencyFund(profile)
-        )} using a liquid fund or sweep FD.`;
+        return `Build your emergency fund from ${formatINR(profile.emergencyFund)} to ${formatINR(getRecommendedEmergencyFund(profile))} using a liquid fund or sweep FD.`;
       case "insurance":
-        return `Increase term cover by about ${formatINR(
-          getInsuranceGap(profile),
-          true
-        )} so protection moves closer to 10x annual income.`;
+        return `Increase term cover by about ${formatINR(getInsuranceGap(profile), true)} so protection moves closer to 10x annual income.`;
       case "investment":
-        return `Raise your SIP from ${formatINR(profile.monthlySIP)} toward ${formatINR(
-          profile.monthlyIncome * 0.2
-        )} to invest 20% of monthly income.`;
+        return `Raise your SIP from ${formatINR(profile.monthlySIP)} toward ${formatINR(profile.monthlyIncome * 0.2)} to invest 20% of monthly income.`;
       case "debt":
-        return `Your EMI load is ${getDebtToIncomeRatio(profile).toFixed(
-          1
-        )}% of income; push it below 40% by prepaying expensive loans first.`;
+        return `Your EMI load is ${getDebtToIncomeRatio(profile).toFixed(1)}% of income; push it below 40% by prepaying expensive loans first.`;
       case "tax": {
         const used80C = Math.min(profile.annual80C + profile.annualPF, 150_000);
-        return `You still have ${formatINR(
-          Math.max(0, 150_000 - used80C)
-        )} of 80C room left this year for ELSS, PPF, or EPF-linked savings.`;
+        return `You still have ${formatINR(Math.max(0, 150_000 - used80C))} of 80C room left this year for ELSS, PPF, or EPF-linked savings.`;
       }
       case "retirement": {
         const fireTarget = getFireCorpusTarget(profile);
         const progress = fireTarget > 0 ? Math.min((profile.existingCorpus / fireTarget) * 100, 100) : 0;
-        return `Current corpus covers ${progress.toFixed(0)}% of your FIRE goal; a SIP of about ${formatINR(
-          sipNeededFor(profile, fireTarget, profile.retirementAge)
-        )} can close the gap by retirement.`;
+        return `Current corpus covers ${progress.toFixed(0)}% of your FIRE goal; a SIP of about ${formatINR(sipNeededFor(profile, fireTarget, profile.retirementAge))} can close the gap by retirement.`;
       }
       default:
         return `Keep improving your ${dimension.label.toLowerCase()} score step by step.`;
@@ -1356,11 +1187,20 @@ export function getHealthImprovementFallback(profile: UserProfileData): string[]
   });
 }
 
+// ---------------------------------------------------------------------------
+// FIX 4 — Old regime tax now includes HRA exemption (was missing in FIRE tab)
+// FIX 7 — NPS deduction: annualNPS (not annualNPS * 0.8)
+//          80CCD(1B) allows full employee contribution up to ₹50,000
+// ---------------------------------------------------------------------------
 export function getOldRegimeTax(profile: UserProfileData): number {
   const annualIncome = safeAnnualIncome(profile);
   const oldRegime80C = Math.min(profile.annual80C + profile.annualPF, 150_000);
-  const npsDeduction = Math.min(profile.annualNPS * 0.8, 50_000);
-  const taxableIncome = Math.max(0, annualIncome - 50_000 - oldRegime80C - npsDeduction);
+  // FIX 7: was annualNPS * 0.8 — employee NPS contribution is deductible in full up to ₹50K
+  const npsDeduction = Math.min(profile.annualNPS, 50_000);
+  // FIX 4: compute and subtract HRA exemption the same way TaxWizardSnapshot does
+  const taxWizardInput = createTaxWizardInput(profile);
+  const hraExemption = getHraExemption(taxWizardInput);
+  const taxableIncome = Math.max(0, annualIncome - 50_000 - oldRegime80C - npsDeduction - hraExemption);
   return applySlabs(taxableIncome, OLD_REGIME_SLABS);
 }
 
@@ -1379,13 +1219,9 @@ export function getTaxSaving(profile: UserProfileData): number {
 }
 
 export function getHraExemption(input: TaxWizardInput): number {
-  if (input.annualHRAReceived <= 0 || input.annualRentPaid <= 0 || input.basicSalary <= 0) {
-    return 0;
-  }
-
+  if (input.annualHRAReceived <= 0 || input.annualRentPaid <= 0 || input.basicSalary <= 0) return 0;
   const rentMinusBasicThreshold = Math.max(0, input.annualRentPaid - input.basicSalary * 0.1);
   const salaryCap = input.basicSalary * (input.metroCity ? 0.5 : 0.4);
-
   return roundToTwo(Math.max(0, Math.min(input.annualHRAReceived, rentMinusBasicThreshold, salaryCap)));
 }
 
@@ -1397,7 +1233,8 @@ export function getTaxWizardSnapshot(
   const hraExemption = getHraExemption(input);
   const used80C = Math.min(input.annual80C + input.annualPF, 150_000);
   const remaining80CRoom = roundToTwo(Math.max(0, 150_000 - used80C));
-  const npsDeductionUsed = roundToTwo(Math.min(input.annualNPS * 0.8, 50_000));
+  // FIX 7: full NPS contribution, not 80%
+  const npsDeductionUsed = roundToTwo(Math.min(input.annualNPS, 50_000));
   const remainingNpsDeductionRoom = roundToTwo(Math.max(0, 50_000 - npsDeductionUsed));
 
   const oldTaxableIncome = roundToTwo(
@@ -1416,7 +1253,6 @@ export function getTaxWizardSnapshot(
   const potentialAdditionalOldRegimeSaving = roundToTwo(Math.max(0, oldTax - optimizedOldTax));
 
   const deductionOpportunities: TaxDeductionOpportunity[] = [];
-
   if (remaining80CRoom > 0) {
     deductionOpportunities.push({
       id: "80c",
@@ -1425,17 +1261,14 @@ export function getTaxWizardSnapshot(
       helper: "You can still use ELSS, PPF, VPF, or tax-saver FD to move closer to the 80C cap.",
     });
   }
-
   if (remainingNpsDeductionRoom > 0) {
     deductionOpportunities.push({
       id: "nps",
-      title: `Modeled NPS room available: ${formatINR(remainingNpsDeductionRoom)}`,
+      title: `NPS room available: ${formatINR(remainingNpsDeductionRoom)}`,
       amount: remainingNpsDeductionRoom,
-      helper:
-        "This app's tax model still has room under the additional NPS deduction bucket, which can improve the old-regime outcome.",
+      helper: "This app's tax model still has room under the additional NPS deduction bucket.",
     });
   }
-
   if (hraExemption > 0) {
     deductionOpportunities.push({
       id: "hra",
@@ -1454,7 +1287,7 @@ export function getTaxWizardSnapshot(
       suggestedAmount: remaining80CRoom,
       risk: "aggressive",
       liquidity: "medium",
-      helper: "Best when you want 80C tax relief with growth potential and the shortest common lock-in among tax-saving products.",
+      helper: "Best when you want 80C tax relief with growth potential and the shortest lock-in among tax-saving products.",
     },
     {
       id: "ppf",
@@ -1472,7 +1305,7 @@ export function getTaxWizardSnapshot(
       suggestedAmount: remaining80CRoom,
       risk: "conservative",
       liquidity: "low",
-      helper: "Useful for salaried users who want a simple payroll-linked 80C top-up with very low decision overhead.",
+      helper: "Useful for salaried users who want a simple payroll-linked 80C top-up.",
     },
     {
       id: "tax-saver-fd",
@@ -1487,22 +1320,17 @@ export function getTaxWizardSnapshot(
       id: "nps",
       title: "NPS Tier I top-up",
       bucket: "80CCD(1B)",
-      suggestedAmount: remainingNpsDeductionRoom > 0 ? roundToTwo(remainingNpsDeductionRoom / 0.8) : 0,
+      suggestedAmount: remainingNpsDeductionRoom > 0 ? remainingNpsDeductionRoom : 0,
       risk: (profile.riskProfile === "conservative" ? "moderate" : profile.riskProfile) as RiskProfile,
       liquidity: "low",
       helper: "Best for long-horizon retirement savings when you are comfortable locking money in for extra tax efficiency.",
     },
   ] satisfies TaxSavingRecommendation[])
     .filter((item) => item.suggestedAmount > 0)
-    .sort((left, right) => {
-      const leftScore =
-        getRiskAlignmentScore(profile.riskProfile, left.risk) +
-        getLiquidityAlignmentScore(liquidityNeed, left.liquidity);
-      const rightScore =
-        getRiskAlignmentScore(profile.riskProfile, right.risk) +
-        getLiquidityAlignmentScore(liquidityNeed, right.liquidity);
-
-      return rightScore - leftScore;
+    .sort((a, b) => {
+      const aScore = getRiskAlignmentScore(profile.riskProfile, a.risk) + getLiquidityAlignmentScore(liquidityNeed, a.liquidity);
+      const bScore = getRiskAlignmentScore(profile.riskProfile, b.risk) + getLiquidityAlignmentScore(liquidityNeed, b.liquidity);
+      return bScore - aScore;
     });
 
   return {
@@ -1524,17 +1352,13 @@ export function getTaxWizardSnapshot(
   };
 }
 
-export function getTaxWizardFallbackSummary(
-  profile: UserProfileData,
-  snapshot: TaxWizardSnapshot
-): string {
+export function getTaxWizardFallbackSummary(profile: UserProfileData, snapshot: TaxWizardSnapshot): string {
   const regimeLine =
     snapshot.taxSaving <= 0
       ? "Both regimes are effectively tied with your current tax inputs."
       : `Right now the ${snapshot.betterRegime} regime is ahead by about ${formatINR(snapshot.taxSaving)}.`;
   const topRecommendation = snapshot.rankedRecommendations[0];
   const liquidityNeed = getLiquidityNeed(profile);
-
   return [
     regimeLine,
     snapshot.remaining80CRoom > 0
@@ -1552,30 +1376,24 @@ export function getTaxWizardFallbackSummary(
 export function formatINR(value: number, compact = false): string {
   const sign = value < 0 ? "-" : "";
   const absolute = Math.abs(value);
-
-  if (!compact) {
-    return `${sign}\u20B9${formatIndianDigits(absolute)}`;
-  }
-
-  if (absolute >= 10_000_000) {
-    return `${sign}\u20B9${trimTrailingZero((absolute / 10_000_000).toFixed(1))}Cr`;
-  }
-
-  if (absolute >= 100_000) {
-    return `${sign}\u20B9${trimTrailingZero((absolute / 100_000).toFixed(1))}L`;
-  }
-
-  if (absolute >= 1_000) {
-    return `${sign}\u20B9${trimTrailingZero((absolute / 1_000).toFixed(1))}K`;
-  }
-
+  if (!compact) return `${sign}\u20B9${formatIndianDigits(absolute)}`;
+  if (absolute >= 10_000_000) return `${sign}\u20B9${trimTrailingZero((absolute / 10_000_000).toFixed(1))}Cr`;
+  if (absolute >= 100_000) return `${sign}\u20B9${trimTrailingZero((absolute / 100_000).toFixed(1))}L`;
+  if (absolute >= 1_000) return `${sign}\u20B9${trimTrailingZero((absolute / 1_000).toFixed(1))}K`;
   return `${sign}\u20B9${trimTrailingZero(absolute.toFixed(0))}`;
 }
 
+// ---------------------------------------------------------------------------
+// FIX 8 — Updated tax brackets to FY2025-26 new regime slabs
+// Old: 5% above 2.5L, 20% above 5L, 30% above 10L
+// New: matches the actual 2025 new regime structure used for joint optimization
+// ---------------------------------------------------------------------------
 export function getTaxBracket(annualIncome: number): number {
-  if (annualIncome > 1000000) return 0.3;
-  if (annualIncome > 500000) return 0.2;
-  if (annualIncome > 250000) return 0.05;
+  if (annualIncome > 1_500_000) return 0.3;
+  if (annualIncome > 1_200_000) return 0.2;
+  if (annualIncome > 1_000_000) return 0.15;
+  if (annualIncome > 700_000) return 0.1;
+  if (annualIncome > 300_000) return 0.05;
   return 0;
 }
 
@@ -1583,36 +1401,29 @@ export function calculateJointOptimization(jointData: JointProfileData): JointOp
   const { user, partner, homeLoan, portfolio } = jointData;
   const userIncome = safeAnnualIncome(user);
   const partnerIncome = partner ? partner.annualIncome : 0;
-
   const userBracket = getTaxBracket(userIncome);
   const partnerBracket = getTaxBracket(partnerIncome);
 
-  // 1. Combined Net Worth
   const combinedNetWorth =
     user.existingCorpus +
     (partner?.existingCorpus ?? 0) -
     user.totalDebt -
     (homeLoan.active ? homeLoan.totalPrincipalOutstandig : 0);
 
-  // 2. HRA Optimization
   let hraSuggestion: JointOptimizationResult["hraSuggestion"] = {
     recommendedClaimer: "none",
     estimatedSaving: 0,
     reason: "No partner data or HRA inputs identified.",
   };
-
   if (partner) {
     const higherBracket = userBracket > partnerBracket ? "user" : "partner";
     const bracketDiff = Math.abs(userBracket - partnerBracket);
     const potentialHra = Math.max(user.annualHRA, partner.annualHRA);
-
     if (bracketDiff > 0) {
       hraSuggestion = {
-        recommendedClaimer: higherBracket as any,
+        recommendedClaimer: higherBracket as "user" | "partner",
         estimatedSaving: potentialHra * bracketDiff,
-        reason: `${higherBracket === "user" ? user.name : partner.name} is in a higher tax bracket (${(
-          Math.max(userBracket, partnerBracket) * 100
-        ).toFixed(0)}%). Claiming HRA here maximizes tax savings.`,
+        reason: `${higherBracket === "user" ? user.name : partner.name} is in a higher tax bracket (${(Math.max(userBracket, partnerBracket) * 100).toFixed(0)}%). Claiming HRA here maximizes tax savings.`,
       };
     } else {
       hraSuggestion = {
@@ -1623,44 +1434,36 @@ export function calculateJointOptimization(jointData: JointProfileData): JointOp
     }
   }
 
-  // 3. Tax Harvesting
   const userHarvest = Math.min(portfolio.userLTCG, 125_000);
   const partnerHarvest = Math.min(portfolio.partnerLTCG, 125_000);
   const taxHarvesting: JointOptimizationResult["taxHarvesting"] = {
     userSell: userHarvest,
     partnerSell: partnerHarvest,
     totalTaxFreeGain: userHarvest + partnerHarvest,
-    nextStep: `Sell units with up to ${formatINR(userHarvest)} gain for ${user.name} and ${formatINR(
-      partnerHarvest
-    )} for partner to use the combined ₹2.5L tax-free limit.`,
+    nextStep: `Sell units with up to ${formatINR(userHarvest)} gain for ${user.name} and ${formatINR(partnerHarvest)} for partner to use the combined ₹2.5L tax-free limit.`,
   };
 
-  // 4. Home Loan Advice
   let homeLoanAdvice: JointOptimizationResult["homeLoanAdvice"] = {
     optimalInterestClaimer: "split",
     optimalPrincipalClaimer: "split",
     estimatedTaxBenefit: 0,
   };
-
   if (homeLoan.active && partner) {
-    const interestLimit = 200_000;
     const optimalInterest = userBracket > partnerBracket ? "user" : partnerBracket > userBracket ? "partner" : "split";
     homeLoanAdvice = {
-      optimalInterestClaimer: optimalInterest as any,
+      optimalInterestClaimer: optimalInterest as "user" | "partner" | "split",
       optimalPrincipalClaimer: "split",
-      estimatedTaxBenefit: Math.min(homeLoan.annualInterest, interestLimit) * Math.max(userBracket, partnerBracket),
+      estimatedTaxBenefit: Math.min(homeLoan.annualInterest, 200_000) * Math.max(userBracket, partnerBracket),
     };
   }
 
-  // 5. SIP Splits
   const user80CRoom = Math.max(0, 150_000 - (user.annual80C + user.annualPF));
   const partner80CRoom = partner ? Math.max(0, 150_000 - (partner.annual80C + partner.annualPF)) : 0;
-  
   const sipSplits: JointOptimizationResult["sipSplits"] = {
     userSIP: user.monthlySIP,
     partnerSIP: partner?.monthlySIP ?? 0,
-    reason: partner 
-      ? `Allocate SIPs to fill ${user.name}'s ₹${formatIndianDigits(user80CRoom)} room and partner's ₹${formatIndianDigits(partner80CRoom)} room to maximize 80C benefits across both.`
+    reason: partner
+      ? `Allocate SIPs to fill ${user.name}'s ${formatINR(user80CRoom)} room and partner's ${formatINR(partner80CRoom)} room to maximize 80C benefits across both.`
       : "Start by adding partner data to optimize joint SIP splits.",
   };
 

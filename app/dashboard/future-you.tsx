@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { Alert, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from "react-native";
 import { router } from "expo-router";
 import * as Animatable from "react-native-animatable";
 import * as Sharing from "expo-sharing";
@@ -12,6 +12,7 @@ import Animated, {
   useAnimatedReaction,
   useAnimatedStyle,
   useSharedValue,
+  withDelay,
   withTiming,
 } from "react-native-reanimated";
 
@@ -23,6 +24,7 @@ import { AuthService } from "../../src/core/services/AuthService";
 import {
   FutureMilestone,
   formatINR,
+  estimateFireAge,
   getFireCorpusTarget,
   getFutureMilestones,
   getFutureProjectionPoints,
@@ -51,6 +53,58 @@ function yFmt(v: number): string {
   return v === 0 ? "0" : String(Math.round(v));
 }
 
+// ─── twin scenario definitions ────────────────────────────────────────────────
+
+interface TwinScenario {
+  key:          string;
+  label:        string;
+  description:  string;
+  color:        string;
+  sipMultiplier:(baseSIP: number, monthlyIncome: number) => number;
+  cagr:         number;
+  extraMonthly: (monthlyEMI: number) => number;
+}
+
+const TWIN_SCENARIOS: TwinScenario[] = [
+  {
+    key:         "today",
+    label:       "You Today",
+    description: "Current path — no changes",
+    color:       Colors.blue,
+    sipMultiplier: () => 1,
+    cagr:        0.12,
+    extraMonthly: () => 0,
+  },
+  {
+    key:         "optimised",
+    label:       "Optimised You",
+    description: "SIP +₹5,000 · direct index funds",
+    color:       Colors.teal,
+    sipMultiplier: () => 1,
+    cagr:        0.13,
+    extraMonthly: () => 5000,
+  },
+  {
+    key:         "aggressive",
+    label:       "Aggressive You",
+    description: "SIP at 20% income · max 80C + NPS",
+    color:       Colors.gold,
+    sipMultiplier: (baseSIP, monthlyIncome) =>
+      baseSIP > 0 ? (monthlyIncome * 0.2) / baseSIP : 1,
+    cagr:        0.14,
+    extraMonthly: () => 0,
+  },
+  {
+    key:         "debtfree",
+    label:       "Debt-Free You",
+    description: "All EMI redirected into SIP",
+    color:       Colors.purple,
+    sipMultiplier: () => 1,
+    cagr:        0.12,
+    extraMonthly: (emi) => emi,
+  },
+];
+
 // ─── sub-components ───────────────────────────────────────────────────────────
 
 function AnimatedProjectionValue({ value }: { value: number }) {
@@ -77,13 +131,13 @@ function EmptyState() {
       <View style={styles.hero}>
         <Text style={styles.title}>Future You Mirror</Text>
         <Text style={styles.subtitle}>
-          Finish onboarding first so the app can project your future corpus using your real SIP, corpus, retirement goal, and risk context.
+          Finish onboarding first so the app can project your future corpus.
         </Text>
       </View>
       <View style={styles.emptyCard}>
         <Text style={styles.emptyTitle}>Your future projection unlocks after profile setup</Text>
         <Text style={styles.emptyBody}>
-          We need your age, corpus, monthly SIP, expenses, and retirement target to build the projection curve and FIRE status.
+          We need your age, corpus, monthly SIP, expenses, and retirement target.
         </Text>
         <Button label="Go To Onboarding" onPress={() => router.push("/onboarding")} />
       </View>
@@ -92,8 +146,8 @@ function EmptyState() {
 }
 
 function MilestoneCard({ milestone }: { milestone: FutureMilestone }) {
-  const color         = MILESTONE_COLORS[milestone.key];
-  const progressValue = useSharedValue(0);
+  const color          = MILESTONE_COLORS[milestone.key];
+  const progressValue  = useSharedValue(0);
   const targetProgress = Math.max(milestone.progress * 100, milestone.complete ? 100 : 6);
 
   useEffect(() => {
@@ -122,15 +176,13 @@ function MilestoneCard({ milestone }: { milestone: FutureMilestone }) {
   );
 }
 
-// ─── custom SVG bar chart ─────────────────────────────────────────────────────
+// ─── projection bar chart ─────────────────────────────────────────────────────
 
-interface BarChartProps {
-  data:        Array<{ age: number; corpus: number; highlighted: boolean }>;
-  fireTarget:  number;
-  width:       number;
-}
-
-function ProjectionBarChart({ data, fireTarget, width }: BarChartProps) {
+function ProjectionBarChart({ data, fireTarget, width }: {
+  data:       Array<{ age: number; corpus: number; highlighted: boolean }>;
+  fireTarget: number;
+  width:      number;
+}) {
   if (data.length === 0) return null;
 
   const svgW  = width;
@@ -149,88 +201,151 @@ function ProjectionBarChart({ data, fireTarget, width }: BarChartProps) {
   const xPos = (i: number) => padL + (i + 0.5) * (plotW / data.length);
   const yPos = (v: number) => padT + plotH - (v / yMax) * plotH;
 
-  const yTickCount = 5;
-  const yTicks = Array.from({ length: yTickCount }, (_, i) =>
-    Math.round((yMax / (yTickCount - 1)) * i)
-  );
-
-  const fireY = yPos(fireTarget);
+  const yTicks = Array.from({ length: 5 }, (_, i) => Math.round((yMax / 4) * i));
+  const fireY  = yPos(fireTarget);
   const showFireLine = fireTarget > 0 && fireY >= padT && fireY <= padT + plotH;
 
   return (
     <Svg width={svgW} height={svgH}>
-
-      {/* Y grid lines + labels */}
       {yTicks.map((tick) => {
         const y = yPos(tick);
         return (
-          <React.Fragment key={"ytick-" + tick}>
-            <Line
-              x1={padL} y1={y} x2={svgW - padR} y2={y}
-              stroke="rgba(255,255,255,0.06)"
-              strokeWidth={0.5}
-            />
-            <SvgText
-              x={padL - 6} y={y + 4}
-              textAnchor="end"
-              fill="rgba(255,255,255,0.35)"
-              fontSize={9}
-            >
+          <React.Fragment key={"y-" + tick}>
+            <Line x1={padL} y1={y} x2={svgW - padR} y2={y}
+              stroke="rgba(255,255,255,0.06)" strokeWidth={0.5} />
+            <SvgText x={padL - 6} y={y + 4} textAnchor="end"
+              fill="rgba(255,255,255,0.35)" fontSize={9}>
               {yFmt(tick)}
             </SvgText>
           </React.Fragment>
         );
       })}
-
-      {/* FIRE target dashed line */}
       {showFireLine ? (
-        <Line
-          x1={padL} y1={fireY} x2={svgW - padR} y2={fireY}
-          stroke="#DC4E4E"
-          strokeWidth={1.5}
-          strokeDasharray="6,4"
-          opacity={0.7}
-        />
+        <Line x1={padL} y1={fireY} x2={svgW - padR} y2={fireY}
+          stroke="#DC4E4E" strokeWidth={1.5} strokeDasharray="6,4" opacity={0.7} />
       ) : null}
-
-      {/* Bars */}
       {data.map((d, i) => {
         const x   = xPos(i) - barW / 2;
         const top = yPos(d.corpus);
         const h   = Math.max(padT + plotH - top, 2);
         return (
-          <Rect
-            key={"bar-" + d.age}
-            x={x} y={top}
-            width={barW} height={h}
-            fill={d.highlighted ? "#D4AF37" : "#2A4A7F"}
-            rx={3}
-          />
+          <Rect key={"bar-" + d.age} x={x} y={top} width={barW} height={h}
+            fill={d.highlighted ? "#D4AF37" : "#2A4A7F"} rx={3} />
         );
       })}
-
-      {/* X axis baseline */}
-      <Line
-        x1={padL} y1={padT + plotH}
-        x2={svgW - padR} y2={padT + plotH}
-        stroke="rgba(255,255,255,0.15)"
-        strokeWidth={0.5}
-      />
-
-      {/* X labels */}
+      <Line x1={padL} y1={padT + plotH} x2={svgW - padR} y2={padT + plotH}
+        stroke="rgba(255,255,255,0.15)" strokeWidth={0.5} />
       {data.map((d, i) => (
-        <SvgText
-          key={"xlabel-" + d.age}
-          x={xPos(i)} y={svgH - 8}
-          textAnchor="middle"
-          fill="rgba(255,255,255,0.4)"
-          fontSize={10}
-        >
+        <SvgText key={"x-" + d.age} x={xPos(i)} y={svgH - 8}
+          textAnchor="middle" fill="rgba(255,255,255,0.4)" fontSize={10}>
           {String(d.age)}
         </SvgText>
       ))}
-
     </Svg>
+  );
+}
+
+// ─── twin card ────────────────────────────────────────────────────────────────
+
+function TwinCard({
+  scenario,
+  index,
+  profile,
+  fireTarget,
+}: {
+  scenario:   TwinScenario;
+  index:      number;
+  profile:    NonNullable<ReturnType<typeof useAppStore.getState>["currentProfile"]>;
+  fireTarget: number;
+}) {
+  const opacity = useSharedValue(0);
+  const y       = useSharedValue(20);
+
+  useEffect(() => {
+    opacity.value = withDelay(index * 80, withTiming(1, { duration: 400, easing: Easing.out(Easing.cubic) }));
+    y.value       = withDelay(index * 80, withTiming(0, { duration: 400, easing: Easing.out(Easing.cubic) }));
+  }, [index, opacity, y]);
+
+  const animStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value, transform: [{ translateY: y.value }],
+  }));
+
+  const retirementAge  = profile.retirementAge ?? 60;
+  const sipMultiplier  = scenario.sipMultiplier(profile.monthlySIP, profile.monthlyIncome);
+  const extraMonthly   = scenario.extraMonthly(profile.monthlyEMI);
+
+  const effectiveProfile = extraMonthly > 0
+    ? { ...profile, monthlySIP: profile.monthlySIP + extraMonthly }
+    : profile;
+
+  const corpus       = projectedCorpusForScenario(effectiveProfile, retirementAge, sipMultiplier, scenario.cagr);
+  const passive      = getMonthlyPassiveIncome(corpus);
+  const fireAchieved = fireTarget > 0 && corpus >= fireTarget;
+  const fireAge      = estimateFireAge(effectiveProfile, fireTarget, scenario.cagr);
+
+  const corpusText  = formatINR(corpus, true);
+  const passiveText = formatINR(passive) + "/mo";
+  const fireAgeText = fireAge !== null ? "FIRE at " + fireAge : "Beyond 75";
+
+  function handleTap() {
+    router.push({
+      pathname: "/dashboard/twin-detail",
+      params: {
+        key:          scenario.key,
+        label:        scenario.label,
+        sipMultiplier: String(sipMultiplier),
+        cagr:          String(scenario.cagr),
+        extraMonthly:  String(extraMonthly),
+      },
+    });
+  }
+
+  return (
+    <Animated.View style={animStyle}>
+      <TouchableOpacity
+        style={[styles.twinCard, { borderColor: scenario.color + "44" }]}
+        onPress={handleTap}
+        activeOpacity={0.75}
+      >
+        {/* header */}
+        <View style={styles.twinCardHeader}>
+          <View style={[styles.twinColorDot, { backgroundColor: scenario.color }]} />
+          <View style={styles.twinCardHeaderText}>
+            <Text style={styles.twinCardLabel}>{scenario.label}</Text>
+            <Text style={styles.twinCardDesc}>{scenario.description}</Text>
+          </View>
+          <View style={[styles.twinStatusBadge, {
+            backgroundColor: fireAchieved ? Colors.tealDim : Colors.s3,
+            borderColor:     fireAchieved ? Colors.teal + "44" : Colors.b0,
+          }]}>
+            <Text style={[styles.twinStatusText, { color: fireAchieved ? Colors.teal : Colors.t2 }]}>
+              {fireAchieved ? "FIRE ✓" : "Building"}
+            </Text>
+          </View>
+        </View>
+
+        {/* metrics */}
+        <View style={styles.twinMetrics}>
+          <View style={styles.twinMetric}>
+            <Text style={[styles.twinMetricValue, { color: scenario.color }]}>{corpusText}</Text>
+            <Text style={styles.twinMetricLabel}>At retirement</Text>
+          </View>
+          <View style={styles.twinMetricDivider} />
+          <View style={styles.twinMetric}>
+            <Text style={[styles.twinMetricValue, { color: scenario.color }]}>{passiveText}</Text>
+            <Text style={styles.twinMetricLabel}>Passive income</Text>
+          </View>
+          <View style={styles.twinMetricDivider} />
+          <View style={styles.twinMetric}>
+            <Text style={[styles.twinMetricValue, { color: scenario.color }]}>{fireAgeText}</Text>
+            <Text style={styles.twinMetricLabel}>FIRE date</Text>
+          </View>
+        </View>
+
+        {/* tap hint */}
+        <Text style={styles.twinTapHint}>Tap for full projection →</Text>
+      </TouchableOpacity>
+    </Animated.View>
   );
 }
 
@@ -241,18 +356,18 @@ export default function FutureYouTab() {
   const shareCardRef = useRef<ViewShot | null>(null);
   const { width }    = useWindowDimensions();
 
-  const [targetAge,       setTargetAge]       = useState(0);
-  const [sipMultiplier,   setSipMultiplier]   = useState(1);
-  const [cagr,            setCagr]            = useState(0.12);
-  const [narrative,       setNarrative]       = useState("");
-  const [narrativeLoading,setNarrativeLoading]= useState(false);
-  const [narrativeError,  setNarrativeError]  = useState("");
-  const [sharing,         setSharing]         = useState(false);
+  const [targetAge,        setTargetAge]        = useState(0);
+  const [sipMultiplier,    setSipMultiplier]     = useState(1);
+  const [cagr,             setCagr]             = useState(0.12);
+  const [narrative,        setNarrative]         = useState("");
+  const [narrativeLoading, setNarrativeLoading]  = useState(false);
+  const [narrativeError,   setNarrativeError]    = useState("");
+  const [sharing,          setSharing]           = useState(false);
   const narrativeOpacity = useSharedValue(0);
 
-  const currentProfile  = profile;
-  const minTargetAge    = currentProfile ? Math.min(70, currentProfile.age + 5) : 35;
-  const maxTargetAge    = 70;
+  const currentProfile   = profile;
+  const minTargetAge     = currentProfile ? Math.min(70, currentProfile.age + 5) : 35;
+  const maxTargetAge     = 70;
   const initialTargetAge = currentProfile
     ? Math.max(minTargetAge, Math.min(maxTargetAge, currentProfile.retirementAge || minTargetAge))
     : 35;
@@ -273,15 +388,12 @@ export default function FutureYouTab() {
     () => currentProfile ? projectedCorpusForScenario(currentProfile, selectedAge, sipMultiplier, cagr) : 0,
     [cagr, currentProfile, selectedAge, sipMultiplier]
   );
-  const fireTarget = useMemo(
-    () => currentProfile ? getFireCorpusTarget(currentProfile) : 0,
-    [currentProfile]
-  );
-  const passiveIncome  = useMemo(() => getMonthlyPassiveIncome(projectedCorpus), [projectedCorpus]);
-  const fireAchieved   = fireTarget > 0 && projectedCorpus >= fireTarget;
-  const fireGap        = Math.max(0, fireTarget - projectedCorpus);
-  const fireProgress   = fireTarget > 0 ? Math.min(projectedCorpus / fireTarget, 1) : 0;
-  const milestones     = useMemo(
+  const fireTarget    = useMemo(() => currentProfile ? getFireCorpusTarget(currentProfile) : 0, [currentProfile]);
+  const passiveIncome = useMemo(() => getMonthlyPassiveIncome(projectedCorpus), [projectedCorpus]);
+  const fireAchieved  = fireTarget > 0 && projectedCorpus >= fireTarget;
+  const fireGap       = Math.max(0, fireTarget - projectedCorpus);
+  const fireProgress  = fireTarget > 0 ? Math.min(projectedCorpus / fireTarget, 1) : 0;
+  const milestones    = useMemo(
     () => currentProfile ? getFutureMilestones(currentProfile, projectedCorpus) : [],
     [currentProfile, projectedCorpus]
   );
@@ -341,10 +453,10 @@ export default function FutureYouTab() {
     try {
       setSharing(true);
       const canUseBiometric = await AuthService.canUseBiometric();
-      if (!canUseBiometric) throw new Error("Biometric authentication is not available on this device.");
+      if (!canUseBiometric) throw new Error("Biometric authentication is not available.");
       const verified = await AuthService.promptBiometric("Confirm before sharing your Future You card");
       if (!verified) return;
-      if (!(await Sharing.isAvailableAsync())) throw new Error("Sharing is not available on this device.");
+      if (!(await Sharing.isAvailableAsync())) throw new Error("Sharing is not available.");
       const uri = await shareCardRef.current?.capture?.();
       if (!uri) throw new Error("Unable to generate the share card.");
       await Sharing.shareAsync(uri, { dialogTitle: `Share your age ${selectedAge} Future You card` });
@@ -384,7 +496,6 @@ export default function FutureYouTab() {
             {fireAchieved ? "FIRE achieved" : "Building towards FIRE"}
           </Text>
         </View>
-
         <View style={styles.metricRow}>
           <View style={styles.metricChip}>
             <Text style={styles.metricLabel}>Passive income</Text>
@@ -395,9 +506,7 @@ export default function FutureYouTab() {
             <Text style={styles.metricValue}>{formatINR(scenarioSip)}/month</Text>
           </View>
         </View>
-
         <LiquidProgressBar label={fireAchieved ? "Ahead of plan" : "FIRE readiness"} progress={fireProgress} />
-
         <Text style={styles.projectionBody}>
           {fireAchieved
             ? `This path clears your FIRE target of ${formatINR(fireTarget, true)} by age ${selectedAge}.`
@@ -411,39 +520,25 @@ export default function FutureYouTab() {
         <View style={styles.sliderStack}>
           <SliderField
             helper="Choose the age where you want to meet your future self."
-            label="Mirror age"
-            max={maxTargetAge}
-            min={minTargetAge}
+            label="Mirror age" max={maxTargetAge} min={minTargetAge}
             onValueChange={setTargetAge}
             rangeLabel={`${minTargetAge} to ${maxTargetAge} years`}
-            value={selectedAge}
-            valueLabel={`${selectedAge} years`}
-            variant="fire-dark"
+            value={selectedAge} valueLabel={`${selectedAge} years`} variant="fire-dark"
           />
           <SliderField
             helper={`Current SIP of ${formatINR(currentProfile.monthlySIP)} grows or shrinks here.`}
-            label="SIP multiplier"
-            max={3}
-            min={0.5}
-            onValueChange={(value) => setSipMultiplier(Number(value.toFixed(1)))}
-            rangeLabel="0.5x to 3.0x"
-            step={0.1}
-            value={sipMultiplier}
-            valueLabel={`${sipMultiplier.toFixed(1)}x`}
-            variant="fire-dark"
+            label="SIP multiplier" max={3} min={0.5}
+            onValueChange={(v) => setSipMultiplier(Number(v.toFixed(1)))}
+            rangeLabel="0.5x to 3.0x" step={0.1}
+            value={sipMultiplier} valueLabel={`${sipMultiplier.toFixed(1)}x`} variant="fire-dark"
           />
           <Text style={styles.centerControlValue}>{sipMultiplier.toFixed(1)}x</Text>
           <SliderField
             helper="Try different long-term return assumptions to pressure-test the outcome."
-            label="Expected CAGR"
-            max={0.2}
-            min={0.06}
-            onValueChange={(value) => setCagr(Number(value.toFixed(2)))}
-            rangeLabel="6% to 20%"
-            step={0.01}
-            value={cagr}
-            valueLabel={`${(cagr * 100).toFixed(0)}%`}
-            variant="fire-dark"
+            label="Expected CAGR" max={0.2} min={0.06}
+            onValueChange={(v) => setCagr(Number(v.toFixed(2)))}
+            rangeLabel="6% to 20%" step={0.01}
+            value={cagr} valueLabel={`${(cagr * 100).toFixed(0)}%`} variant="fire-dark"
           />
           <Text style={styles.centerControlValue}>{(cagr * 100).toFixed(0)}%</Text>
         </View>
@@ -453,29 +548,42 @@ export default function FutureYouTab() {
       <Animatable.View animation="fadeInUp" delay={210} duration={500} style={styles.section}>
         <Text style={styles.sectionTitle}>Milestone progress</Text>
         <View style={styles.milestoneStack}>
-          {milestones.map((milestone) => (
-            <MilestoneCard key={milestone.key} milestone={milestone} />
+          {milestones.map((m) => <MilestoneCard key={m.key} milestone={m} />)}
+        </View>
+      </Animatable.View>
+
+      {/* ── financial twins ── */}
+      <Animatable.View animation="fadeInUp" delay={250} duration={500} style={styles.section}>
+        <View style={styles.twinSectionHeader}>
+          <Text style={styles.sectionTitle}>Financial Twins</Text>
+          <Text style={styles.twinSectionSub}>4 versions of you · tap any to explore</Text>
+        </View>
+        <View style={styles.twinList}>
+          {TWIN_SCENARIOS.map((scenario, i) => (
+            <TwinCard
+              key={scenario.key}
+              scenario={scenario}
+              index={i}
+              profile={currentProfile}
+              fireTarget={fireTarget}
+            />
           ))}
         </View>
       </Animatable.View>
 
       {/* ── projection chart ── */}
-      <Animatable.View animation="fadeInUp" delay={260} duration={500} style={styles.section}>
+      <Animatable.View animation="fadeInUp" delay={290} duration={500} style={styles.section}>
         <Text style={styles.sectionTitle}>5-year projection curve</Text>
         <View style={styles.chartCard}>
           <Text style={styles.chartBody}>
             Every bar is a future age checkpoint. The selected age is highlighted in gold.
           </Text>
-          <ProjectionBarChart
-            data={chartData}
-            fireTarget={fireTarget}
-            width={chartWidth}
-          />
+          <ProjectionBarChart data={chartData} fireTarget={fireTarget} width={chartWidth} />
         </View>
       </Animatable.View>
 
       {/* ── AI narrative ── */}
-      <Animatable.View animation="fadeInUp" delay={320} duration={500} style={styles.section}>
+      <Animatable.View animation="fadeInUp" delay={330} duration={500} style={styles.section}>
         <Text style={styles.sectionTitle}>AI narrative</Text>
         <Animated.View style={[styles.narrativeCard, narrativeAnimatedStyle]}>
           <View style={styles.aiBadge}>
@@ -488,18 +596,13 @@ export default function FutureYouTab() {
       </Animatable.View>
 
       {/* ── share ── */}
-      <Animatable.View animation="fadeInUp" delay={380} duration={500} style={styles.section}>
+      <Animatable.View animation="fadeInUp" delay={370} duration={500} style={styles.section}>
         <View style={styles.shareCard}>
           <View style={styles.shareHeader}>
             <Text style={styles.shareTitle}>Secure share card</Text>
             <Button
-              label="Share Card"
-              loading={sharing}
-              onPress={() => {
-                handleShare().catch((e) => {
-                  Alert.alert("Unable to share card", e instanceof Error ? e.message : "Please try again.");
-                });
-              }}
+              label="Share Card" loading={sharing}
+              onPress={() => { handleShare().catch((e) => { Alert.alert("Unable to share card", e instanceof Error ? e.message : "Please try again."); }); }}
               style={styles.shareButton}
             />
           </View>
@@ -509,7 +612,7 @@ export default function FutureYouTab() {
         </View>
       </Animatable.View>
 
-      {/* ── ViewShot capture card ── */}
+      {/* ── ViewShot ── */}
       <View pointerEvents="none" style={styles.captureContainer}>
         <ViewShot ref={shareCardRef} options={{ format: "png", quality: 1 }}>
           <View collapsable={false} style={styles.captureCard}>
@@ -535,14 +638,13 @@ export default function FutureYouTab() {
 
 const styles = StyleSheet.create({
   hero:     { gap: Spacing.md, marginBottom: Spacing.xl },
-  eyebrow:  { color: Colors.purple, fontFamily: Typography.fontFamily.bodyMedium, fontSize: Typography.size.sm, letterSpacing: 0.8, textTransform: "uppercase" },
   title:    { color: "#FFFFFF", fontFamily: Typography.fontFamily.displaySemiBold, fontSize: 28, letterSpacing: -0.5 },
   subtitle: { color: "rgba(255,255,255,0.4)", fontFamily: Typography.fontFamily.body, fontSize: 14, lineHeight: 20 },
 
   projectionCard: {
-    backgroundColor: "#0D1B35",
-    borderRadius: 24, borderWidth: 0.5, borderColor: "rgba(255,255,255,0.06)",
-    gap: Spacing.lg, marginBottom: Spacing.xl, overflow: "hidden", padding: Spacing.xl,
+    backgroundColor: "#0D1B35", borderRadius: 24, borderWidth: 0.5,
+    borderColor: "rgba(255,255,255,0.06)", gap: Spacing.lg,
+    marginBottom: Spacing.xl, overflow: "hidden", padding: Spacing.xl,
   },
   confettiMask:    { bottom: 0, left: 0, position: "absolute", right: 0, top: 0 },
   projectionHeader:{ gap: Spacing.md },
@@ -564,7 +666,7 @@ const styles = StyleSheet.create({
   centerControlValue: { alignSelf: "center", color: "#D4AF37", fontFamily: Typography.fontFamily.numeric, fontSize: 24, fontWeight: "700", marginBottom: Spacing.sm },
 
   milestoneStack: { gap: Spacing.md },
-  milestoneCard:  { backgroundColor: "#1A1A1A", borderBottomLeftRadius: 0, borderBottomRightRadius: 16, borderLeftWidth: 3, borderTopLeftRadius: 0, borderTopRightRadius: 16, borderWidth: 0.5, borderColor: "#2A2A2A", gap: Spacing.sm, padding: Spacing.lg },
+  milestoneCard:  { backgroundColor: "#1A1A1A", borderBottomRightRadius: 16, borderLeftWidth: 3, borderTopRightRadius: 16, borderWidth: 0.5, borderColor: "#2A2A2A", gap: Spacing.sm, padding: Spacing.lg },
   milestoneHeader:{ alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   milestoneTitle: { color: "#FFFFFF", fontFamily: Typography.fontFamily.bodyMedium, fontSize: Typography.size.md },
   milestoneStatus:{ fontFamily: Typography.fontFamily.displaySemiBold, fontSize: Typography.size.sm },
@@ -573,6 +675,29 @@ const styles = StyleSheet.create({
   progressTrack:  { backgroundColor: "rgba(255,255,255,0.06)", borderRadius: Radius.full, height: 6, overflow: "hidden" },
   progressFill:   { borderRadius: Radius.full, height: "100%" },
 
+  // ── twins ──────────────────────────────────────────────────────────────────
+  twinSectionHeader: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between" },
+  twinSectionSub:    { color: Colors.t2, fontFamily: Typography.fontFamily.body, fontSize: Typography.size.xs },
+  twinList:          { gap: Spacing.md },
+  twinCard: {
+    backgroundColor: Colors.s1, borderRadius: Radius.lg,
+    borderWidth: 0.5, padding: Spacing.md, gap: Spacing.md,
+  },
+  twinCardHeader:    { flexDirection: "row", alignItems: "flex-start", gap: Spacing.sm },
+  twinColorDot:      { width: 10, height: 10, borderRadius: 5, marginTop: 4, flexShrink: 0 },
+  twinCardHeaderText:{ flex: 1 },
+  twinCardLabel:     { color: Colors.t0, fontFamily: Typography.fontFamily.bodyMedium, fontSize: Typography.size.sm, marginBottom: 2 },
+  twinCardDesc:      { color: Colors.t2, fontFamily: Typography.fontFamily.body, fontSize: Typography.size.xs, lineHeight: 16 },
+  twinStatusBadge:   { borderRadius: Radius.full, borderWidth: 0.5, paddingHorizontal: Spacing.sm, paddingVertical: 3 },
+  twinStatusText:    { fontFamily: Typography.fontFamily.bodyMedium, fontSize: 10 },
+  twinMetrics:       { flexDirection: "row", alignItems: "center" },
+  twinMetric:        { flex: 1, alignItems: "center", gap: 3 },
+  twinMetricValue:   { fontFamily: Typography.fontFamily.numeric, fontSize: Typography.size.sm },
+  twinMetricLabel:   { color: Colors.t2, fontFamily: Typography.fontFamily.body, fontSize: 10 },
+  twinMetricDivider: { width: 0.5, height: 32, backgroundColor: Colors.b0 },
+  twinTapHint:       { color: Colors.t3, fontFamily: Typography.fontFamily.body, fontSize: 10, textAlign: "right" },
+
+  // ── chart ──────────────────────────────────────────────────────────────────
   chartCard: { backgroundColor: "#1A1A1A", borderRadius: 20, borderWidth: 0.5, borderColor: "#2A2A2A", overflow: "hidden", paddingVertical: Spacing.lg },
   chartBody: { color: "rgba(255,255,255,0.35)", fontFamily: Typography.fontFamily.body, fontSize: 12, lineHeight: 22, paddingHorizontal: Spacing.lg, marginBottom: Spacing.sm },
 
