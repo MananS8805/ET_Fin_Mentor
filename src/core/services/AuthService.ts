@@ -291,6 +291,8 @@ export const AuthService = {
     await supabase.auth.signOut();
     await persistSession(null);
     await ProfileService.clearLocalProfile();
+    await SecureStore.deleteItemAsync(StorageKeys.profile, SECURE_STORE_OPTIONS);
+    await SecureStore.deleteItemAsync("et_finmentor_joint_profile", SECURE_STORE_OPTIONS);
     await SecureStore.deleteItemAsync(StorageKeys.demoMode, SECURE_STORE_OPTIONS);
     await SecureStore.deleteItemAsync(StorageKeys.demoPersona, SECURE_STORE_OPTIONS);
     await SecureStore.deleteItemAsync(StorageKeys.dismissedAlerts, SECURE_STORE_OPTIONS);

@@ -891,9 +891,12 @@ export const GeminiService = {
           parts: [
             {
               text: [
-                "Write exactly 3 short sentences summarizing this tax plan.",
-                "Stay under 110 words total.",
-                "Mention the winning regime, the biggest deduction gap, and the strongest recommended next move.",
+                 "Write exactly 4 short sentences summarizing this tax plan.",
+                "Stay under 140 words total.",
+                "Sentence 1: State the winning regime and tax saving amount.",
+                "Sentence 2: Mention the biggest deduction gap the user should fill.",
+                "Sentence 3: Give the strongest recommended next move with a specific rupee amount.",
+                "Sentence 4: List 2-3 other exemptions NOT modeled in this tool that the user should discuss with a CA — choose from LTA, 80E education loan interest, 80G donations, gratuity exemption, meal allowance, children education allowance, 80DD disabled dependent. Keep it brief and end with 'Consult a CA to claim these.'",
                 "No markdown bullets.",
                 `Annual salary: ${formatINR(snapshot.input.annualIncome)}.`,
                 `Old regime tax: ${formatINR(snapshot.oldTax)}.`,

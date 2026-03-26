@@ -58,6 +58,7 @@ const MODULES: ModuleTile[] = [
   { key: "future",    icon: "◈", title: "Future You",      subtitle: "Scenario mirror",      to: "/dashboard/future-you"   },
   { key: "couple",    icon: "⊗", title: "Couple Planner",  subtitle: "Joint strategy",       to: "/couples-planner"        },
   { key: "chat",      icon: "◐", title: "Money Chat",      subtitle: "Ask FinMentor AI",     to: "/dashboard/chat"         },
+  { key: "life",      icon: "◑", title: "Life Events",     subtitle: "SIP streak + advice",  to: "/life-events"            }, 
 ];
 
 // ET Markets RSS feed — no API key needed, real ET content
@@ -248,7 +249,7 @@ export default function DashboardHome() {
     if (h < 12) return "Good morning";
     if (h < 17) return "Good afternoon";
     return "Good evening";
-  }, []);
+  }, []); 
 
   const greetingText    = greeting + ", " + firstName;
   const xirrText        = "XIRR: " + (xirr !== null ? xirr.toFixed(1) + "%" : "N/A");

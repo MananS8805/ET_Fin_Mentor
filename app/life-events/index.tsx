@@ -161,8 +161,16 @@ function EventOptionCard({
         style={[styles.eventCard, selected ? styles.eventCardActive : null]}
       >
         {selected ? <View style={styles.eventActiveAccent} /> : null}
-        <Text style={[styles.eventLabel, selected ? styles.eventLabelActive : null]}>{label}</Text>
-        <Text style={styles.eventHelper}>{helper}</Text>
+        <Text
+          ellipsizeMode="tail"
+          numberOfLines={1}
+          style={[styles.eventLabel, selected ? styles.eventLabelActive : null]}
+        >
+          {label}
+        </Text>
+        <Text numberOfLines={3} style={styles.eventHelper}>
+          {helper}
+        </Text>
       </Pressable>
     </Animated.View>
   );
@@ -630,10 +638,12 @@ const styles = StyleSheet.create({
     borderColor: Colors.b0,
     borderRadius: 16,
     borderWidth: 0.5,
+    flex: 1,
+    flexBasis: "45%",
     gap: Spacing.sm,
+    minWidth: 150,
     overflow: "hidden",
     padding: Spacing.lg,
-    width: "48%",
   },
   eventCardActive: {
     backgroundColor: Colors.goldDim,

@@ -174,10 +174,13 @@ export interface TaxWizardInput {
   annualPF: number;
   annual80C: number;
   annualNPS: number;
+  annual80D: number;           // health insurance premium
+  homeLoanInterest: number;    // section 24b
+  professionalTax: number;
 }
 
 export interface TaxDeductionOpportunity {
-  id: "hra" | "80c" | "nps";
+  id: "hra" | "80c" | "nps" | "80d" | "homeloan";
   title: string;
   amount: number;
   helper: string;
@@ -487,6 +490,9 @@ export function createTaxWizardInput(
     annualPF: overrides.annualPF ?? profile.annualPF,
     annual80C: overrides.annual80C ?? profile.annual80C,
     annualNPS: overrides.annualNPS ?? profile.annualNPS,
+    annual80D: overrides.annual80D ?? (profile.healthInsuranceCover > 0 ? 25_000 : 0),
+    homeLoanInterest: overrides.homeLoanInterest ?? 0,
+    professionalTax: overrides.professionalTax ?? 2_400,
   };
 }
 
@@ -1274,8 +1280,22 @@ export function getTaxWizardSnapshot(
   const npsDeductionUsed = roundToTwo(Math.min(input.annualNPS, 50_000));
   const remainingNpsDeductionRoom = roundToTwo(Math.max(0, 50_000 - npsDeductionUsed));
 
+  const deduction80D = Math.min(input.annual80D ?? 0, 75_000);
+  const deductionHomeLoan = Math.min(input.homeLoanInterest ?? 0, 200_000);
+  const deductionProfTax = Math.min(input.professionalTax ?? 0, 2_500);
+
   const oldTaxableIncome = roundToTwo(
-    Math.max(0, input.annualIncome - 50_000 - used80C - npsDeductionUsed - hraExemption)
+    Math.max(
+      0,
+      input.annualIncome
+        - 50_000               // standard deduction
+        - used80C              // 80C
+        - npsDeductionUsed     // 80CCD(1B)
+        - hraExemption         // HRA
+        - deduction80D         // 80D health insurance
+        - deductionHomeLoan    // Section 24b home loan
+        - deductionProfTax     // Professional tax Section 16
+    )
   );
   const newTaxableIncome = roundToTwo(Math.max(0, input.annualIncome - 75_000));
   const oldTax = applySlabs(oldTaxableIncome, OLD_REGIME_SLABS);
@@ -1290,6 +1310,7 @@ export function getTaxWizardSnapshot(
   const potentialAdditionalOldRegimeSaving = roundToTwo(Math.max(0, oldTax - optimizedOldTax));
 
   const deductionOpportunities: TaxDeductionOpportunity[] = [];
+
   if (remaining80CRoom > 0) {
     deductionOpportunities.push({
       id: "80c",
@@ -1312,6 +1333,25 @@ export function getTaxWizardSnapshot(
       title: `HRA exemption modeled: ${formatINR(hraExemption)}`,
       amount: hraExemption,
       helper: "With rent and salary structure entered, this portion of HRA can reduce taxable income under the old regime.",
+    });
+  }
+  // New: 80D opportunity
+  const remaining80DRoom = Math.max(0, 75_000 - deduction80D);
+  if (remaining80DRoom > 25_000) {
+    deductionOpportunities.push({
+      id: "80d" as any,
+      title: `80D health insurance room: ${formatINR(remaining80DRoom)}`,
+      amount: remaining80DRoom,
+      helper: "Add parents to your health cover or increase cover to use up to ₹75,000 under 80D.",
+    });
+  }
+  // New: Home loan opportunity
+  if ((input.homeLoanInterest ?? 0) === 0) {
+    deductionOpportunities.push({
+      id: "homeloan" as any,
+      title: "Home loan interest not entered",
+      amount: 200_000,
+      helper: "If you have a home loan, Section 24b allows up to ₹2,00,000 deduction on interest paid — old regime only.",
     });
   }
 
@@ -1407,6 +1447,7 @@ export function getTaxWizardFallbackSummary(profile: UserProfileData, snapshot: 
     topRecommendation
       ? `Given your ${profile.riskProfile} profile and ${liquidityNeed} liquidity need, ${topRecommendation.title} is the strongest next tax move.`
       : "Your current tax buckets are already well utilized, so the next step is mainly regime selection.",
+    "Note: This model covers 80C, NPS, HRA, 80D, home loan interest, and professional tax. Additional exemptions like LTA, 80E (education loan), 80G (donations), gratuity, and meal allowances are not modeled here — consult a CA to claim these.",
   ].join(" ");
 }
 

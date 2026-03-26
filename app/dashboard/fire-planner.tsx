@@ -6,6 +6,7 @@ import * as Sharing from "expo-sharing";
 import ViewShot from "react-native-view-shot";
 import Svg, {
   Defs,
+  G,
   LinearGradient,
   Stop,
   Path,
@@ -170,7 +171,7 @@ function FireProjectionChart({ data, width: svgW }: FireProjectionChartProps) {
       {yTicks.map((tick) => {
         const y = CHART_PAD_T + plotH - (tick / yMax) * plotH;
         return (
-          <Animated.View key={`y-${tick}`}>
+          <G key={`y-${tick}`}>
             <SvgLine
               x1={CHART_PAD_L}
               y1={y}
@@ -189,7 +190,7 @@ function FireProjectionChart({ data, width: svgW }: FireProjectionChartProps) {
             >
               {formatINR(tick, true)}
             </SvgText>
-          </Animated.View>
+          </G>
         );
       })}
 
@@ -504,7 +505,7 @@ export default function FirePlannerTab() {
   const targetEquity = allocationSchedule[0]?.equity ?? 70;
   const chartWidth = Math.max(320, width - Spacing["3xl"]);
   const totalPortfolioValue = portfolioXRay?.totalValue ?? currentProfile?.existingCorpus ?? 0;
-  const corpusProgress = fireTarget > 0 ? Math.min(projectedRetirementCorpus / fireTarget, 1) : 0;
+  const corpusProgress = fireTarget > 0 ? Math.min(totalPortfolioValue / fireTarget, 1) : 0;
 
   const taxScenarioProfile = useMemo(
     () => (currentProfile ? createIncomeScenarioProfile(currentProfile, taxAnnualIncome) : null),
@@ -1288,7 +1289,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xs,
   },
   allocationValue: {
-    color: Colors.bg,
+    color: Colors.t0,
     fontFamily: Typography.fontFamily.displaySemiBold,
     fontSize: Typography.size.lg,
   },

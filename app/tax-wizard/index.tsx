@@ -463,6 +463,40 @@ export default function TaxWizardScreen() {
             onChange={(value) => updateDraft("annualNPS", value)}
             value={draft.annualNPS}
           />
+          <CurrencyField
+            label="Health insurance premium (80D)"
+            hint="Self + family: up to ₹25,000. Add parents' premium for up to ₹75,000 total."
+            onChange={(value) => updateDraft("annual80D", value)}
+            value={draft.annual80D}
+          />
+          <CurrencyField
+            label="Home loan interest paid (Sec 24b)"
+            hint="Up to ₹2,00,000 deduction for self-occupied property. Old regime only."
+            onChange={(value) => updateDraft("homeLoanInterest", value)}
+            value={draft.homeLoanInterest}
+          />
+          <CurrencyField
+            label="Professional tax paid"
+            hint="Usually ₹200/month deducted by employer. Check your salary slip."
+            onChange={(value) => updateDraft("professionalTax", value)}
+            value={draft.professionalTax}
+          />
+        </View>
+
+        {/* Not modeled disclaimer */}
+        <View style={styles.notModeledCard}>
+          <Text style={styles.notModeledTitle}>⚠ Not modeled in this tool</Text>
+          <Text style={styles.notModeledBody}>
+            The following exemptions are real but require CA verification and are not calculated here:{"\n"}
+            {"• "}LTA (Leave Travel Allowance){"\n"}
+            {"• "}80E — Education loan interest{"\n"}
+            {"• "}80G — Donations to eligible NGOs{"\n"}
+            {"• "}Meal / food allowance (₹26,400/yr){"\n"}
+            {"• "}Gratuity exemption{"\n"}
+            {"• "}80DD / 80U — Disability deductions{"\n"}
+            {"• "}Children education allowance
+          </Text>
+          <Text style={styles.notModeledCta}>Consult a CA to claim these before filing.</Text>
         </View>
       </View>
 
@@ -976,4 +1010,29 @@ const styles = StyleSheet.create({
       fontSize: Typography.size.sm,
       lineHeight: 20,
     },
+      notModeledCard: {
+    backgroundColor: "rgba(217,142,56,0.08)",
+    borderColor: "rgba(217,142,56,0.25)",
+    borderRadius: 16,
+    borderWidth: 0.5,
+    gap: Spacing.sm,
+    padding: Spacing.lg,
+  },
+  notModeledTitle: {
+    color: Colors.amber,
+    fontFamily: Typography.fontFamily.bodyMedium,
+    fontSize: Typography.size.sm,
+  },
+  notModeledBody: {
+    color: "rgba(255,255,255,0.55)",
+    fontFamily: Typography.fontFamily.body,
+    fontSize: Typography.size.sm,
+    lineHeight: 22,
+  },
+  notModeledCta: {
+    color: Colors.gold,
+    fontFamily: Typography.fontFamily.bodyMedium,
+    fontSize: Typography.size.sm,
+  },
+
 });

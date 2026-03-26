@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { Tabs } from "expo-router";
+import { Tabs, useRouter } from "expo-router";
 import { ComponentProps, useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { BottomTabBarProps } from "@react-navigation/bottom-tabs";
@@ -97,10 +97,24 @@ function FloatingTabBar({ state, descriptors, navigation, insets }: BottomTabBar
 }
 
 export default function DashboardLayout() {
+  const router = useRouter();
   const demoMode = useAppStore((state) => state.demoMode);
+  const authStatus = useAppStore((state) => state.authStatus);
+  const session = useAppStore((state) => state.session);
+  const currentProfile = useAppStore((state) => state.currentProfile);
   const { width } = useWindowDimensions();
   const isWideLayout = width >= 960;
   const insets = useSafeAreaInsets();
+
+  useEffect(() => {
+    if (authStatus === "idle" || authStatus === "loading") return;
+    if (demoMode) return;
+    if (authStatus === "unauthenticated" || !session) {
+      router.replace("/auth");
+      return;
+    }
+    if (!currentProfile) return;
+  }, [authStatus, currentProfile, demoMode, router, session]);
 
   return (
     <Tabs

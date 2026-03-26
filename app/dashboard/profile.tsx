@@ -41,9 +41,11 @@ export default function ProfileTab() {
       setSigningOut(true);
       await AuthService.signOut();
       reset();
-      router.push("/auth");
+      router.replace("/auth");
     } catch (error) {
-      Alert.alert("Unable to sign out", error instanceof Error ? error.message : "Please try again.");
+      console.error("[SignOut] Failed:", error);
+      reset();
+      router.replace("/auth");
     } finally {
       setSigningOut(false);
     }

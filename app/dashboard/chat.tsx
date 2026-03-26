@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import {
   ActivityIndicator,
   NativeScrollEvent,
@@ -256,6 +256,75 @@ function EmptyChatState() {
   );
 }
 
+// Separated composer component to prevent parent re-renders on keystroke
+function ChatComposer({
+  onSend,
+  sending,
+  sessionExpired,
+  isWideLayout,
+  insets,
+}: {
+  onSend: (text: string) => Promise<void>;
+  sending: boolean;
+  sessionExpired: boolean;
+  isWideLayout: boolean;
+  insets: ReturnType<typeof useSafeAreaInsets>;
+}) {
+  const [input, setInput] = useState("");
+
+  const handleSend = useCallback(async () => {
+    const trimmed = input.trim();
+    if (!trimmed || sending) return;
+    setInput("");
+    await onSend(trimmed);
+  }, [input, sending, onSend]);
+
+  return (
+    <View
+      style={[
+        styles.composerShell,
+        {
+          paddingBottom: isWideLayout ? Spacing.lg + insets.bottom : 84 + insets.bottom,
+        },
+      ]}
+    >
+      {sessionExpired ? (
+        <View style={styles.expiredBar}>
+          <Text style={styles.expiredText}>Session expired. Sign in again to keep chatting.</Text>
+          <Pressable onPress={() => router.push("/auth")} style={styles.expiredSigninBtn}>
+            <Text style={styles.expiredSigninText}>Sign In</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <View style={styles.composerBar}>
+          <View style={styles.composerInner}>
+            <TextInput
+              editable={!sending}
+              multiline
+              onChangeText={setInput}
+              placeholder="Ask about savings, tax, SIP, debt, FIRE..."
+              placeholderTextColor="rgba(255,255,255,0.3)"
+              style={styles.input}
+              value={input}
+            />
+            <Pressable
+              disabled={!input.trim() || sending}
+              onPress={handleSend}
+              style={[styles.sendBtn, !input.trim() || sending ? styles.sendBtnDisabled : null]}
+            >
+              {sending ? (
+                <ActivityIndicator color={Colors.bg} />
+              ) : (
+                <Text style={styles.sendBtnIcon}>▶</Text>
+              )}
+            </Pressable>
+          </View>
+        </View>
+      )}
+    </View>
+  );
+}
+
 export default function ChatTab() {
   const profile = useAppStore((state) => state.currentProfile);
   const chatHistory = useAppStore((state) => state.chatHistory);
@@ -281,7 +350,6 @@ export default function ChatTab() {
   const { width } = useWindowDimensions();
   const isWideLayout = width >= 960;
 
-  const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [streamingText, setStreamingText] = useState("");
   const [sessionExpired, setSessionExpired] = useState(false);
@@ -306,20 +374,20 @@ export default function ChatTab() {
     return () => clearTimeout(timer);
   }, [chatHistory.length, sending]);
 
-  function handleListScroll(event: NativeSyntheticEvent<NativeScrollEvent>) {
+  const handleListScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
     const distanceFromBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
     const isNearBottom = distanceFromBottom < SCROLL_BOTTOM_THRESHOLD;
     stickToBottomRef.current = isNearBottom;
-    setShowScrollToLatest(!isNearBottom && visibleMessages.length > 4);
-  }
+    setShowScrollToLatest(!isNearBottom && chatHistory.length > 4);
+  }, [chatHistory.length]);
 
-  function handleJumpToLatest() {
+  const handleJumpToLatest = useCallback(() => {
     stickToBottomRef.current = true;
     setShowScrollToLatest(false);
     listRef.current?.scrollToEnd({ animated: true });
     void Haptics.selectionAsync();
-  }
+  }, []);
 
   const visibleMessages = useMemo(() => {
     if (!sending) return chatHistory;
@@ -334,27 +402,22 @@ export default function ChatTab() {
     }
     return [...chatHistory, GeminiService.createModelMessage("...", "system")];
   }, [chatHistory, sending, streamingText]);
+  
   const activeProvider = GeminiService.getLastProviderUsed();
-
-  if (!profile) {
-    return <EmptyChatState />;
-  }
-
   const currentProfile = profile;
 
-  async function handleCopy(message: ChatMessage) {
+  const handleCopy = useCallback(async (message: ChatMessage) => {
     await Clipboard.setStringAsync(message.text);
     setCopiedId(message.id);
     void Haptics.selectionAsync();
     setTimeout(() => setCopiedId((current) => (current === message.id ? null : current)), 1200);
-  }
+  }, []);
 
-  async function handleSend(textOverride?: string) {
-    const trimmed = (textOverride ?? input).trim();
-    if (!trimmed || sending) return;
+  const handleSend = useCallback(async (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed || sending || !currentProfile) return;
 
     const optimisticHistory = [...chatHistory, GeminiService.createUserMessage(trimmed)];
-    setInput("");
     setSending(true);
     setSessionExpired(false);
     setStreamingText("");
@@ -403,9 +466,9 @@ export default function ChatTab() {
     } finally {
       setSending(false);
     }
-  }
+  }, [sending, chatHistory, currentProfile, setChatHistory]);
 
-  function renderQuickReplies() {
+  const renderQuickReplies = useCallback(() => {
     if (chatHistory.length !== 1 || chatHistory[0]?.kind !== "welcome") {
       return null;
     }
@@ -432,9 +495,9 @@ export default function ChatTab() {
         ))}
       </View>
     );
-  }
+  }, [chatHistory, alertChip, handleSend]);
 
-  function renderMessage({ item }: ListRenderItemInfo<ChatMessage>) {
+  const renderMessage = useCallback(({ item }: ListRenderItemInfo<ChatMessage>) => {
     const isUser = item.role === "user";
     const isError = item.kind === "error";
     const isTypingGhost = item.kind === "system" && item.text === "...";
@@ -464,56 +527,34 @@ export default function ChatTab() {
         </View>
       </MessageRowAnimated>
     );
-  }
+  }, [copiedId, handleCopy, renderQuickReplies]);
 
-  function renderHeroHeader() {
+  const renderHeroHeader = useCallback(() => {
+    if (!currentProfile) return null;
     return <ChatHeroCard activeProvider={activeProvider} onClear={clearChatHistory} profile={currentProfile} />;
-  }
+  }, [activeProvider, clearChatHistory, currentProfile]);
+
+  const keyExtractor = useCallback((item: ChatMessage) => item.id, []);
+
+  const handleContentSizeChange = useCallback(() => {
+    if (stickToBottomRef.current) {
+      listRef.current?.scrollToEnd({ animated: true });
+    }
+  }, []);
 
   const footer = (
-    <View
-      style={[
-        styles.composerShell,
-        {
-          paddingBottom: isWideLayout ? Spacing.lg + insets.bottom : 84 + insets.bottom,
-        },
-      ]}
-    >
-      {sessionExpired ? (
-        <View style={styles.expiredBar}>
-          <Text style={styles.expiredText}>Session expired. Sign in again to keep chatting.</Text>
-          <Pressable onPress={() => router.push("/auth")} style={styles.expiredSigninBtn}>
-            <Text style={styles.expiredSigninText}>Sign In</Text>
-          </Pressable>
-        </View>
-      ) : (
-        <View style={styles.composerBar}>
-          <View style={styles.composerInner}>
-            <TextInput
-              editable={!sending}
-              multiline
-              onChangeText={setInput}
-              placeholder="Ask about savings, tax, SIP, debt, FIRE..."
-              placeholderTextColor="rgba(255,255,255,0.3)"
-              style={styles.input}
-              value={input}
-            />
-            <Pressable
-              disabled={!input.trim() || sending}
-              onPress={() => void handleSend()}
-              style={[styles.sendBtn, !input.trim() || sending ? styles.sendBtnDisabled : null]}
-            >
-              {sending ? (
-                <ActivityIndicator color={Colors.bg} />
-              ) : (
-                <Text style={styles.sendBtnIcon}>▶</Text>
-              )}
-            </Pressable>
-          </View>
-        </View>
-      )}
-    </View>
+    <ChatComposer
+      onSend={handleSend}
+      sending={sending}
+      sessionExpired={sessionExpired}
+      isWideLayout={isWideLayout}
+      insets={insets}
+    />
   );
+
+  if (!profile) {
+    return <EmptyChatState />;
+  }
 
   return (
     <Screen footer={footer}>
@@ -525,15 +566,11 @@ export default function ChatTab() {
           initialNumToRender={10}
           keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"
-          keyExtractor={(item) => item.id}
+          keyExtractor={keyExtractor}
           ListHeaderComponent={renderHeroHeader}
           maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
           maxToRenderPerBatch={10}
-          onContentSizeChange={() => {
-            if (stickToBottomRef.current) {
-              listRef.current?.scrollToEnd({ animated: true });
-            }
-          }}
+          onContentSizeChange={handleContentSizeChange}
           onScroll={handleListScroll}
           ref={listRef}
           removeClippedSubviews

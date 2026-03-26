@@ -35,6 +35,7 @@ export function Button({
   accessibilityLabel,
 }: ButtonProps) {
   const isPrimary = variant === "primary";
+  const isSecondary = variant === "secondary";
   const isGhost = variant === "ghost";
   const isSuccess = variant === "success";
   const isError = variant === "error";
@@ -65,6 +66,7 @@ export function Button({
 
   let textColor: string = Colors.textPrimary;
   if (isPrimary) textColor = Colors.bg;
+  if (isSecondary) textColor = Colors.bg;
   if (isGhost) textColor = Colors.gold;
   if (isSuccess) textColor = Colors.bg;
   if (isError) textColor = Colors.white;

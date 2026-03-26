@@ -27,6 +27,7 @@ import { OtpInput } from "../../src/components/OtpInput";
 import { TextField } from "../../src/components/TextField";
 import { AppConfig } from "../../src/core/config";
 import { AuthLockoutError, AuthService } from "../../src/core/services/AuthService";
+import { ProfileService } from "../../src/core/services/ProfileService";
 import { useAppStore } from "../../src/core/services/store";
 import { Colors, Spacing, Typography } from "../../src/core/theme";
 
@@ -336,9 +337,19 @@ export default function AuthScreen() {
         throw new Error("Phone verification succeeded, but no session was returned.");
       }
 
-      reset();
+      await new Promise((resolve) => setTimeout(resolve, 50));
       setSession(session);
-      setCurrentProfile(null);
+
+      const existingProfile = await ProfileService.loadProfile(session);
+      setCurrentProfile(existingProfile ?? null);
+
+      if (existingProfile?.onboardingComplete) {
+        requestAnimationFrame(() => {
+          router.replace("/dashboard");
+        });
+        return;
+      }
+
       setStep(3);
       setPhoneOtp("");
     } catch (authError) {

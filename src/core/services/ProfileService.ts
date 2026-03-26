@@ -216,7 +216,10 @@ export const ProfileService = {
       }
 
       if (!response.data) {
-        return localProfile;
+        if (localProfile && localProfile.id === session.user.id) {
+          return localProfile;
+        }
+        return null;
       }
 
       const remoteProfile = fromRow(response.data as Partial<UserProfileRow>);
