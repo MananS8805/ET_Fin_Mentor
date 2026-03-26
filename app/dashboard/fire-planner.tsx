@@ -773,7 +773,7 @@ export default function FirePlannerTab() {
           </View>
         </View>
 
-        <LiquidProgressBar label="Target corpus" progress={corpusProgress} />
+        <LiquidProgressBar label="Retirement Corpus Readiness" progress={corpusProgress} />
 
         <View style={styles.summaryRow}>
           <View style={[styles.summaryPill, styles.targetPill]}>
@@ -793,9 +793,12 @@ export default function FirePlannerTab() {
             ? `At your current SIP, the projected corpus at age ${plannerRetirementAge} is ${formatINR(projectedRetirementCorpus, true)}, leaving a gap of ${formatINR(projectionGap, true)}.`
             : `At your current SIP, the projected corpus at age ${plannerRetirementAge} is ${formatINR(projectedRetirementCorpus, true)}, which clears the target.`}
         </Text>
-        <Text style={styles.summaryBodyMuted}>
-          Time remaining: {yearsRemaining} years. Existing SIP: {formatINR(currentProfile.monthlySIP)}/month.
-        </Text>
+       <Text style={styles.summaryBodyMuted}>
+  {yearsRemaining} years remaining · SIP entered in profile: {formatINR(currentProfile.monthlySIP)}/month
+  {sipGap > 0
+    ? " · need " + formatINR(sipGap) + "/month more to close the " + formatINR(projectionGap, true) + " corpus gap"
+    : " · on track to meet target"}
+</Text>
       </Animatable.View>
 
       <Animatable.View animation="fadeInUp" delay={190} duration={500} style={styles.section}>
@@ -1173,7 +1176,7 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   summaryBodyMuted: {
-    color: Colors.t1,
+    color: Colors.t2,
     fontFamily: Typography.fontFamily.body,
     fontSize: 13,
     lineHeight: 20,
@@ -1267,7 +1270,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.full,
     borderWidth: 0,
     flex: 1,
-    padding: Spacing.md,
+    padding: Spacing.md,  
   },
   allocationChipEquity: { backgroundColor: "rgba(29,158,117,0.12)" },
   allocationChipDebt: { backgroundColor: "rgba(212,175,55,0.12)" },
@@ -1547,7 +1550,7 @@ const styles = StyleSheet.create({
     borderWidth: 0.5,
     borderColor: Colors.border,
     gap: Spacing.md,
-    padding: Spacing.xl,
+    padding: Spacing.xl,  
   },
   emptyTitle: {
     color: Colors.textPrimary,
@@ -1560,4 +1563,4 @@ const styles = StyleSheet.create({
     fontSize: Typography.size.md,
     lineHeight: 24,
   },
-});
+}); 

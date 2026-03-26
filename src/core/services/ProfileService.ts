@@ -2,7 +2,12 @@ import * as SecureStore from "expo-secure-store";
 import { Session } from "@supabase/supabase-js";
 
 import { AppConfig, StorageKeys } from "../config";
-import { UserProfileData, createEmptyUserProfile } from "../models/UserProfile";
+import {
+  CAMSData,
+  UserProfileData,
+  createEmptyUserProfile,
+  reviveCAMSData,
+} from "../models/UserProfile";
 import { supabase } from "./supabase";
 
 type UserProfileRow = {
@@ -83,12 +88,12 @@ function toRow(profile: UserProfileData, userId: string) {
     goals: profile.goals,
     total_debt: profile.totalDebt,
     onboarding_complete: profile.onboardingComplete,
-    cams_data: profile.camsData ?? null,
+    cams_data: serializeCAMSData(profile.camsData),
   };
 }
 
 function fromRow(row: Partial<UserProfileRow>): UserProfileData {
-  return createEmptyUserProfile({
+  const revived = createEmptyUserProfile({
     id: row.id ?? `profile-${Date.now()}`,
     name: row.name ?? "",
     age: toNumber(row.age),
@@ -113,12 +118,48 @@ function fromRow(row: Partial<UserProfileRow>): UserProfileData {
     goals: row.goals ?? [],
     totalDebt: toNumber(row.total_debt),
     onboardingComplete: Boolean(row.onboarding_complete),
-    camsData: row.cams_data ?? undefined,
+    camsData: reviveCAMSData(row.cams_data),
   });
+
+  if (__DEV__) {
+    console.log("[Load] revived holdings:", revived.camsData?.holdings?.length ?? 0);
+    console.log(
+      "[Load] first holding date type:",
+      typeof revived.camsData?.holdings?.[0]?.purchaseDate
+    );
+  }
+
+  return revived;
+}
+
+function toISOStringOrUndefined(value: unknown): string | undefined {
+  if (!value) return undefined;
+  const parsed = new Date(value as string | number | Date);
+  if (Number.isNaN(parsed.getTime())) return undefined;
+  return parsed.toISOString();
+}
+
+function serializeCAMSData(camsData: CAMSData | undefined): any {
+  if (!camsData) return { holdings: [] };
+
+  return {
+    holdings: camsData.holdings.map((h) => ({
+      ...h,
+      purchaseDate: toISOStringOrUndefined(h.purchaseDate),
+      transactions: (h.transactions ?? []).map((t) => ({
+        ...t,
+        date: toISOStringOrUndefined(t.date) ?? new Date().toISOString(),
+      })),
+    })),
+  };
 }
 
 async function saveLocalProfile(profile: UserProfileData) {
-  await SecureStore.setItemAsync(StorageKeys.profile, JSON.stringify(profile), SECURE_STORE_OPTIONS);
+  const forStorage = {
+    ...profile,
+    camsData: serializeCAMSData(profile.camsData),
+  };
+  await SecureStore.setItemAsync(StorageKeys.profile, JSON.stringify(forStorage), SECURE_STORE_OPTIONS);
 }
 
 export const ProfileService = {
@@ -130,8 +171,21 @@ export const ProfileService = {
     }
 
     try {
-      const parsed = JSON.parse(rawProfile) as Partial<UserProfileData>;
-      return createEmptyUserProfile(parsed);
+      const parsed = JSON.parse(rawProfile) as Partial<UserProfileData> & { cams_data?: any };
+      const revived = createEmptyUserProfile({
+        ...parsed,
+        camsData: reviveCAMSData(parsed.camsData ?? parsed.cams_data),
+      });
+
+      if (__DEV__) {
+        console.log("[Load] revived holdings:", revived.camsData?.holdings?.length ?? 0);
+        console.log(
+          "[Load] first holding date type:",
+          typeof revived.camsData?.holdings?.[0]?.purchaseDate
+        );
+      }
+
+      return revived;
     } catch (error) {
       console.warn("[ProfileService] Failed to parse local profile", error);
       return null;
@@ -184,7 +238,12 @@ export const ProfileService = {
         phone: normalizePhone(profile.phone),
         annualIncome: profile.annualIncome || profile.monthlyIncome * 12,
         onboardingComplete: true,
+        camsData: profile.camsData,
       });
+
+      if (__DEV__) {
+        console.log("[Save] camsData holdings:", sanitizedProfile.camsData?.holdings?.length ?? 0);
+      }
 
       await saveLocalProfile(sanitizedProfile);
 

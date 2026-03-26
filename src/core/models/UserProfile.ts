@@ -4,6 +4,10 @@ export type TaxRegime = "old" | "new";
 export type DemoPersonaKey = "rohan" | "priya" | "vikram";
 export type TaxLiquidity = "high" | "medium" | "low";
 
+export type CAMSData = {
+  holdings: MFHolding[];
+};
+
 export interface UserProfileData {
   id: string;
   name: string;
@@ -29,9 +33,7 @@ export interface UserProfileData {
   goals: string[];
   totalDebt: number;
   onboardingComplete: boolean;
-  camsData?: {
-    holdings: MFHolding[];
-  };
+  camsData?: CAMSData;
 }
 
 export interface HealthScoreDimensions {
@@ -433,7 +435,42 @@ export function createEmptyUserProfile(overrides: Partial<UserProfileData> = {})
     goals: overrides.goals ?? [],
     totalDebt: overrides.totalDebt ?? 0,
     onboardingComplete: overrides.onboardingComplete ?? false,
+    camsData: reviveCAMSData(overrides.camsData),
   };
+}
+
+export function reviveCAMSData(raw: any): CAMSData {
+  if (!raw || typeof raw !== "object") return { holdings: [] };
+
+  const rawHoldings = Array.isArray(raw.holdings) ? raw.holdings : [];
+
+  const holdings = rawHoldings.map((h: any) => {
+    const purchaseDateObj = h?.purchaseDate ? new Date(h.purchaseDate) : null;
+    const purchaseDate =
+      purchaseDateObj && !Number.isNaN(purchaseDateObj.getTime())
+        ? purchaseDateObj.toISOString()
+        : undefined;
+
+    const transactions = Array.isArray(h?.transactions)
+      ? h.transactions.map((t: any) => {
+          const dateObj = t?.date ? new Date(t.date) : new Date();
+          const safeDate = Number.isNaN(dateObj.getTime()) ? new Date() : dateObj;
+          return {
+            ...t,
+            date: safeDate,
+            amount: Number.isFinite(Number(t?.amount)) ? Number(t.amount) : 0,
+          };
+        })
+      : [];
+
+    return {
+      ...h,
+      purchaseDate,
+      transactions,
+    } as MFHolding;
+  });
+
+  return { holdings };
 }
 
 export function createTaxWizardInput(

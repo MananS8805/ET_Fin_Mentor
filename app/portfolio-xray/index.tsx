@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Image,
   Modal,
-  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -31,6 +30,7 @@ import {
   MFHolding,
   OverlapPair,
   PortfolioXRay,
+  UserProfileData,
   calculateXIRR,
   formatINR,
   getCategoryAllocation,
@@ -44,7 +44,7 @@ import { Colors, Radius, Shadows, Spacing, Typography } from "../../src/core/the
 import { HoldingEditModal } from "./components/HoldingEditModal";
 import { SchemeInputForm } from "./components/SchemeInputForm";
 
-// ─── helpers ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€ helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function xirrColor(xirr: number | null): string {
   if (xirr === null) return Colors.t2;
@@ -61,7 +61,7 @@ function xirrLabel(xirr: number | null): string {
 function categoryColor(cat: MFHolding["category"]): string {
   const map: Record<MFHolding["category"], string> = {
     large_cap: Colors.teal,
-    mid_cap:   Colors.gold,
+    mid_cap:   Colors.gold, 
     small_cap: Colors.red,
     elss:      Colors.purple,
     debt:      Colors.t3,
@@ -83,7 +83,232 @@ const CATEGORY_LABELS: Record<MFHolding["category"], string> = {
   other:     "Other",
 };
 
-// ─── build xray ───────────────────────────────────────────────────────────────
+type RiskAlignmentAnalysis = {
+  equityPct: number;
+  recommendedMaxEquity: number | null;
+  issues: string[];
+};
+
+type SavingsVelocityResult = {
+  targetMonthly: number;
+  currentMonthly: number;
+  gap: number;
+  savingsRate: number;
+  source: "tracked_sip" | "estimated";
+  sourceNote: string;
+  monthsInvested: number | null;
+};
+
+type EmergencyFundStatus = {
+  monthsCovered: number;
+  recommendedMonths: number;
+  shortfall: number;
+  status: "adequate" | "low" | "critical";
+  liquidAssets: number;
+  monthlyExpenses: number;
+};
+
+type TaxEfficiencyAnalysis = {
+  elssValue: number;
+  estimated80CContribution: number;
+  remaining80CLimit: number;
+  recommendation: string;
+};
+
+function getEquityPct(xray: PortfolioXRay): number {
+  const equity =
+    (xray.categoryAllocation.large_cap ?? 0) +
+    (xray.categoryAllocation.mid_cap ?? 0) +
+    (xray.categoryAllocation.small_cap ?? 0) +
+    (xray.categoryAllocation.elss ?? 0) +
+    (xray.categoryAllocation.hybrid ?? 0);
+  return Math.max(0, Math.min(100, equity));
+}
+
+function getCategoryValue(xray: PortfolioXRay, category: MFHolding["category"]): number {
+  const pct = xray.categoryAllocation[category] ?? 0;
+  return (xray.totalValue * pct) / 100;
+}
+
+function getOldestInvestmentDate(holdings: MFHolding[]): Date | null {
+  const timestamps: number[] = [];
+
+  holdings.forEach((holding) => {
+    if (holding.transactions?.length) {
+      holding.transactions.forEach((txn) => {
+        const date = new Date(txn.date);
+        if (!Number.isNaN(date.getTime())) timestamps.push(date.getTime());
+      });
+      return;
+    }
+
+    if (holding.purchaseDate) {
+      const date = new Date(holding.purchaseDate);
+      if (!Number.isNaN(date.getTime())) timestamps.push(date.getTime());
+    }
+  });
+
+  if (!timestamps.length) return null;
+  return new Date(Math.min(...timestamps));
+}
+
+function getRiskAlignmentAnalysis(xray: PortfolioXRay, profile: UserProfileData): RiskAlignmentAnalysis {
+  const issues: string[] = [];
+  const equityPct = getEquityPct(xray);
+  const recommendedMaxEquity = profile.age > 0 ? Math.max(100 - profile.age, 30) : null;
+
+  if (recommendedMaxEquity !== null && equityPct > recommendedMaxEquity) {
+    issues.push(
+      "Equity at " +
+        equityPct.toFixed(0) +
+        "% exceeds the age-based guide of " +
+        recommendedMaxEquity.toFixed(0) +
+        "% for age " +
+        profile.age +
+        "."
+    );
+  }
+
+  if (profile.riskProfile === "conservative" && equityPct > 50) {
+    issues.push("Conservative profile with " + equityPct.toFixed(0) + "% equity exposure.");
+  }
+
+  if (profile.riskProfile === "aggressive" && equityPct < 60) {
+    issues.push("Aggressive profile but only " + equityPct.toFixed(0) + "% equity. Consider a growth tilt.");
+  }
+
+  return { equityPct, recommendedMaxEquity, issues };
+}
+
+function getSavingsVelocity(xray: PortfolioXRay, profile: UserProfileData): SavingsVelocityResult | null {
+  if (profile.monthlyIncome <= 0) return null;
+
+  const targetMonthly = profile.monthlyIncome * 0.2;
+  let currentMonthly = Math.max(0, profile.monthlySIP);
+  let source: SavingsVelocityResult["source"] = "tracked_sip";
+  let sourceNote = "Based on your tracked SIP of " + formatINR(currentMonthly) + " per month.";
+  let monthsInvested: number | null = null;
+
+  if (currentMonthly <= 0) {
+    const oldest = getOldestInvestmentDate(xray.holdings);
+    if (oldest) {
+      monthsInvested = Math.max(
+        1,
+        (Date.now() - oldest.getTime()) / (1000 * 60 * 60 * 24 * 30.4375)
+      );
+      const base = xray.totalInvested > 0 ? xray.totalInvested : xray.totalValue;
+      currentMonthly = base / monthsInvested;
+      source = "estimated";
+      sourceNote =
+        "Estimated from " +
+        monthsInvested.toFixed(1) +
+        " months of portfolio history (tracked SIP is unavailable).";
+    } else {
+      source = "estimated";
+      sourceNote = "Tracked SIP is zero and portfolio timeline is unavailable, so contribution pace cannot be estimated reliably.";
+    }
+  }
+
+  const savingsRate = profile.monthlyIncome > 0 ? (currentMonthly / profile.monthlyIncome) * 100 : 0;
+
+  return {
+    targetMonthly,
+    currentMonthly,
+    gap: targetMonthly - currentMonthly,
+    savingsRate,
+    source,
+    sourceNote,
+    monthsInvested,
+  };
+}
+
+function getEmergencyFundStatus(xray: PortfolioXRay, profile: UserProfileData): EmergencyFundStatus {
+  const monthlyExpenses =
+    profile.monthlyExpenses > 0 ? profile.monthlyExpenses : Math.max(0, profile.monthlyIncome * 0.5);
+
+  const liquidAssets =
+    Math.max(0, profile.emergencyFund) +
+    getCategoryValue(xray, "liquid") +
+    getCategoryValue(xray, "debt") * 0.5;
+
+  const monthsCovered = monthlyExpenses > 0 ? liquidAssets / monthlyExpenses : 0;
+  const recommendedMonths = 6;
+
+  return {
+    monthsCovered,
+    recommendedMonths,
+    shortfall: Math.max(0, (recommendedMonths - monthsCovered) * monthlyExpenses),
+    status: monthsCovered >= 6 ? "adequate" : monthsCovered >= 3 ? "low" : "critical",
+    liquidAssets,
+    monthlyExpenses,
+  };
+}
+
+function getTaxEfficiencyAnalysis(xray: PortfolioXRay, profile: UserProfileData): TaxEfficiencyAnalysis {
+  const ELSS_LIMIT = 150_000;
+  const elssValue = getCategoryValue(xray, "elss");
+  const estimated80CContribution = Math.min(ELSS_LIMIT, Math.max(0, profile.annual80C + profile.annualPF));
+  const remaining80CLimit = Math.max(0, ELSS_LIMIT - estimated80CContribution);
+
+  let recommendation = "80C limit appears utilized. Focus on low-cost and goal-aligned allocation.";
+  if (remaining80CLimit > 30_000) {
+    recommendation =
+      "Add an ELSS SIP of about " +
+      formatINR(remaining80CLimit / 12) +
+      " per month to improve 80C utilization.";
+  } else if (remaining80CLimit > 0) {
+    recommendation = "Invest remaining " + formatINR(remaining80CLimit) + " in eligible 80C options before the tax deadline.";
+  }
+
+  return {
+    elssValue,
+    estimated80CContribution,
+    remaining80CLimit,
+    recommendation,
+  };
+}
+
+function areTransactionsEqual(
+  a: Array<{ date: Date; amount: number }> | undefined,
+  b: Array<{ date: Date; amount: number }> | undefined
+): boolean {
+  const txA = a ?? [];
+  const txB = b ?? [];
+  if (txA.length !== txB.length) return false;
+
+  for (let i = 0; i < txA.length; i += 1) {
+    const left = txA[i];
+    const right = txB[i];
+    if (new Date(left.date).getTime() !== new Date(right.date).getTime()) return false;
+    if (left.amount !== right.amount) return false;
+  }
+
+  return true;
+}
+
+function areHoldingsEqual(a: MFHolding[], b: MFHolding[]): boolean {
+  if (a.length !== b.length) return false;
+
+  for (let i = 0; i < a.length; i += 1) {
+    const left = a[i];
+    const right = b[i];
+    if (left.id !== right.id) return false;
+    if (left.name !== right.name) return false;
+    if (left.schemeCode !== right.schemeCode) return false;
+    if (left.category !== right.category) return false;
+    if (left.units !== right.units) return false;
+    if (left.nav !== right.nav) return false;
+    if (left.currentValue !== right.currentValue) return false;
+    if (left.purchaseValue !== right.purchaseValue) return false;
+    if ((left.purchaseDate ?? "") !== (right.purchaseDate ?? "")) return false;
+    if (left.xirr !== right.xirr) return false;
+    if (!areTransactionsEqual(left.transactions, right.transactions)) return false;
+  }
+
+  return true;
+}
+
+// â”€â”€â”€ build xray â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function buildXRay(holdings: MFHolding[]): PortfolioXRay {
   const totalValue    = holdings.reduce((s, h) => s + h.currentValue, 0);
@@ -151,57 +376,148 @@ function mapCAMSToHoldings(result: CAMSParseResult): MFHolding[] {
     });
 }
 
-function buildFallbackPlan(xray: PortfolioXRay): string {
+function buildFallbackPlan(
+  xray: PortfolioXRay,
+  profile: UserProfileData | null,
+  riskAnalysis: RiskAlignmentAnalysis | null,
+  emergencyStatus: EmergencyFundStatus | null,
+  savingsVelocity: SavingsVelocityResult | null,
+  taxEfficiency: TaxEfficiencyAnalysis | null
+): string {
   const lines: string[] = [];
 
   if (xray.overlapPairs.length > 0) {
     const pair = xray.overlapPairs[0];
-    lines.push("1. Consider consolidating " + pair.fund1 + " and " + pair.fund2 + " — " + pair.reason);
+    lines.push("1. Consider consolidating " + pair.fund1 + " and " + pair.fund2 + " - " + pair.reason);
+  } else if (xray.expenseRatioDrag > 0) {
+    lines.push(
+      "1. Expense drag is about " +
+        formatINR(xray.expenseRatioDrag) +
+        "/yr. Prioritize shifting high-cost active funds to low-cost direct/index alternatives."
+    );
   } else {
-    lines.push("1. No significant fund overlap detected in your current portfolio.");
+    lines.push("1. No major overlap or cost drag detected. Keep portfolio complexity low and rebalance annually.");
   }
 
-  if (xray.expenseRatioDrag > 0) {
-    lines.push("2. Your portfolio costs roughly " + formatINR(xray.expenseRatioDrag) + " more per year than an equivalent index fund. Consider switching high-expense funds to direct plans.");
+  if (riskAnalysis && riskAnalysis.issues.length > 0) {
+    lines.push("2. " + riskAnalysis.issues[0]);
+  } else if (riskAnalysis && profile) {
+    lines.push(
+      "2. Equity at " +
+        riskAnalysis.equityPct.toFixed(0) +
+        "% is broadly aligned with your " +
+        profile.riskProfile +
+        " profile. Keep allocation drift checks quarterly."
+    );
   } else {
-    lines.push("2. Expense ratio drag is within acceptable range.");
+    lines.push("2. Keep your equity-debt mix aligned with age and declared risk profile.");
   }
 
-  const equityPct =
-    (xray.categoryAllocation.large_cap ?? 0) + (xray.categoryAllocation.mid_cap ?? 0) +
-    (xray.categoryAllocation.small_cap ?? 0) + (xray.categoryAllocation.elss ?? 0) +
-    (xray.categoryAllocation.hybrid ?? 0);
-
-  if (equityPct > 90) {
-    lines.push("3. Portfolio is heavily equity-concentrated. Consider adding a debt or liquid fund for stability.");
-  } else if (equityPct < 40) {
-    lines.push("3. Equity allocation looks low for long-term wealth creation. Review whether your goal horizon supports more equity.");
+  if (emergencyStatus && emergencyStatus.status !== "adequate") {
+    lines.push(
+      "3. Emergency buffer covers about " +
+        emergencyStatus.monthsCovered.toFixed(1) +
+        " months. Build a shortfall of " +
+        formatINR(emergencyStatus.shortfall) +
+        " in liquid/debt buckets first."
+    );
+  } else if (savingsVelocity && savingsVelocity.gap > 0) {
+    lines.push(
+      "3. Increase monthly investing by " +
+        formatINR(savingsVelocity.gap) +
+        " to approach a 20% savings rate target."
+    );
+  } else if (taxEfficiency && taxEfficiency.remaining80CLimit > 0) {
+    lines.push("3. " + taxEfficiency.recommendation);
   } else {
-    lines.push("3. Equity at " + equityPct.toFixed(0) + "% is broadly reasonable. Review annually.");
+    lines.push("3. Savings pace and tax utilization look reasonable; focus next on reducing overlap and cost drag.");
   }
 
   return lines.join("\n\n");
 }
 
-// ─── NAV refresh helper ───────────────────────────────────────────────────────
+// â”€â”€â”€ NAV refresh helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-async function fetchLatestNAV(schemeCode: string): Promise<{ nav: number; date: string } | null> {
+type NAVFetchFailureReason = "timeout" | "http_error" | "invalid_response" | "network_error";
+
+type NAVFetchResult =
+  | { ok: true; nav: number; date: string }
+  | { ok: false; reason: NAVFetchFailureReason };
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+  
+async function fetchLatestNAV(schemeCode: string): Promise<NAVFetchResult> {
+  const TIMEOUT_MS = 20_000;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
   try {
-    const controller = new AbortController();
-    const timeout    = setTimeout(() => controller.abort(), 6000);
-    const res        = await fetch("https://api.mfapi.in/mf/" + schemeCode, { signal: controller.signal });
-    clearTimeout(timeout);
-    if (!res.ok) return null;
+    const res = await fetch("https://api.mfapi.in/mf/" + schemeCode, {
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      console.warn("[NAV] Server error " + res.status + " for scheme " + schemeCode);
+      return { ok: false, reason: "http_error" };
+    }
+
     const json = await res.json();
-    if (json.status !== "SUCCESS" || !json.data?.[0]) return null;
+    if (json.status !== "SUCCESS" || !json.data?.[0]) {
+      console.warn("[NAV] Invalid response for scheme " + schemeCode);
+      return { ok: false, reason: "invalid_response" };
+    }
+
     const nav = parseFloat(json.data[0].nav);
-    return isNaN(nav) ? null : { nav, date: json.data[0].date };
-  } catch {
-    return null;
+    if (Number.isNaN(nav)) {
+      console.warn("[NAV] NAV parse failed for scheme " + schemeCode);
+      return { ok: false, reason: "invalid_response" };
+    }
+
+    return { ok: true, nav, date: json.data[0].date };
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      console.warn("[NAV] Timeout after " + TIMEOUT_MS + "ms for scheme " + schemeCode);
+      return { ok: false, reason: "timeout" };
+    }
+    console.warn("[NAV] Network error for scheme " + schemeCode + ":", err);
+    return { ok: false, reason: "network_error" };
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
-// ─── sub-components ───────────────────────────────────────────────────────────
+async function fetchLatestNAVWithRetry(
+  schemeCode: string,
+  retries = 1,
+  delayMs = 2000
+): Promise<NAVFetchResult> {
+  let lastFailure: NAVFetchResult = { ok: false, reason: "network_error" };
+
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const result = await fetchLatestNAV(schemeCode);
+    if (result.ok) return result;
+    lastFailure = result;
+
+    if (attempt < retries) {
+      console.warn(
+        "[NAV] Retry " +
+          (attempt + 1) +
+          " for scheme " +
+          schemeCode +
+          " in " +
+          delayMs +
+          "ms."
+      );
+      await sleep(delayMs);
+    }
+  }
+
+  return lastFailure;
+}
+
+// â”€â”€â”€ sub-components â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function EmptyState() {
   return (
@@ -283,14 +599,14 @@ function OverlapCard({ pair }: { pair: OverlapPair }) {
         <View style={[styles.overlapBadge, { backgroundColor: bgColor, borderColor }]}>
           <Text style={[styles.overlapLevel, { color: labelColor }]}>{pair.overlapLevel.toUpperCase()}</Text>
         </View>
-        <Text style={styles.overlapFunds} numberOfLines={1}>{pair.fund1 + " · " + pair.fund2}</Text>
+        <Text style={styles.overlapFunds} numberOfLines={1}>{pair.fund1 + " Â· " + pair.fund2}</Text>
       </View>
       <Text style={styles.overlapReason}>{pair.reason}</Text>
     </View>
   );
 }
 
-// ─── main screen ──────────────────────────────────────────────────────────────
+// â”€â”€â”€ main screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export default function PortfolioXRayScreen() {
   const profile           = useAppStore((s) => s.currentProfile);
@@ -300,7 +616,8 @@ export default function PortfolioXRayScreen() {
   const session           = useAppStore((s) => s.session);
   const shareCardRef      = useRef<ViewShot | null>(null);
 
-  const [holdings,       setHoldings]      = useState<MFHolding[]>(portfolioXRay?.holdings ?? []);
+  const [holdings,       setHoldings]      = useState<MFHolding[]>(portfolioXRay?.holdings ?? profile?.camsData?.holdings ?? []);
+  const [holdingsInitialized, setHoldingsInitialized] = useState(false);
   const [parsing,        setParsing]        = useState(false);
   const [parseNote,      setParseNote]      = useState("");
   const [scanPreview,    setScanPreview]    = useState<string | null>(null);
@@ -316,8 +633,15 @@ export default function PortfolioXRayScreen() {
   const [refreshNote,   setRefreshNote]   = useState("");
   const [lastRefreshed, setLastRefreshed] = useState<string | null>(null);
 
-  const xray           = useMemo(() => buildXRay(holdings), [holdings]);
-  const fallbackPlan   = useMemo(() => buildFallbackPlan(xray), [xray]);
+  const xray            = useMemo(() => buildXRay(holdings), [holdings]);
+  const riskAnalysis    = useMemo(() => (profile ? getRiskAlignmentAnalysis(xray, profile) : null), [xray, profile]);
+  const emergencyStatus = useMemo(() => (profile ? getEmergencyFundStatus(xray, profile) : null), [xray, profile]);
+  const savingsVelocity = useMemo(() => (profile ? getSavingsVelocity(xray, profile) : null), [xray, profile]);
+  const taxEfficiency   = useMemo(() => (profile ? getTaxEfficiencyAnalysis(xray, profile) : null), [xray, profile]);
+  const fallbackPlan    = useMemo(
+    () => buildFallbackPlan(xray, profile, riskAnalysis, emergencyStatus, savingsVelocity, taxEfficiency),
+    [xray, profile, riskAnalysis, emergencyStatus, savingsVelocity, taxEfficiency]
+  );
   const pieData        = useMemo(() =>
     Object.entries(xray.categoryAllocation)
       .filter(([, pct]) => pct > 0)
@@ -327,8 +651,29 @@ export default function PortfolioXRayScreen() {
   const refreshableCount = holdings.filter((h) => !!h.schemeCode).length;
 
   useEffect(() => {
-    if (holdings.length > 0) setPortfolioXRay(xray);
+    setPortfolioXRay(holdings.length > 0 ? xray : null);
   }, [holdings, xray, setPortfolioXRay]);
+
+  useEffect(() => {
+    if (!profile || holdingsInitialized) return;
+    const initialHoldings = portfolioXRay?.holdings ?? profile.camsData?.holdings ?? [];
+    if (initialHoldings.length > 0 && holdings.length === 0) {
+      setHoldings(initialHoldings);
+    }
+    setHoldingsInitialized(true);
+  }, [profile, portfolioXRay, holdings.length, holdingsInitialized]);
+
+  useEffect(() => {
+    if (!profile || !holdingsInitialized) return;
+    const existingHoldings = profile.camsData?.holdings ?? [];
+    if (areHoldingsEqual(existingHoldings, holdings)) return;
+
+    const updatedProfile = { ...profile, camsData: { holdings } };
+    setCurrentProfile(updatedProfile);
+    void ProfileService.saveProfile(updatedProfile, session).catch((e) =>
+      console.warn("[PortfolioXRay] Failed to persist:", e)
+    );
+  }, [holdings, profile, session, setCurrentProfile, holdingsInitialized]);
 
   useEffect(() => {
     if (!profile || holdings.length === 0) return;
@@ -349,19 +694,7 @@ export default function PortfolioXRayScreen() {
 
   if (!profile) return <EmptyState />;
 
-  // ── persist ───────────────────────────────────────────────────────────────
-
-  function persistHoldings(next: MFHolding[]) {
-    if (!profile) return;
-    setHoldings(next);
-    const updatedProfile = { ...profile, camsData: { holdings: next } };
-    setCurrentProfile(updatedProfile);
-    void ProfileService.saveProfile(updatedProfile, session).catch((e) =>
-      console.warn("[PortfolioXRay] Failed to persist:", e)
-    );
-  }
-
-  // ── handlers ──────────────────────────────────────────────────────────────
+  // â”€â”€ handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   async function handleParseStatement() {
     try {
@@ -378,24 +711,43 @@ export default function PortfolioXRayScreen() {
       if (mapped.length === 0) throw new Error("No fund holdings found. Try a clearer screenshot.");
       setScanPreview(asset.uri);
       setParseNote(parsed.notes ?? mapped.length + " fund" + (mapped.length !== 1 ? "s" : "") + " detected.");
-      persistHoldings(mapped);
+      setHoldings(mapped);
     } catch (err) {
       Alert.alert("Unable to parse statement", err instanceof Error ? err.message : "Please try a clearer image.");
     } finally { setParsing(false); }
   }
 
   function handleAddSchemeHoldings(newHoldings: MFHolding[]) {
+    const stamp = Date.now();
+    const normalized = newHoldings.map((holding, index) => {
+      const schemeCode =
+        holding.schemeCode ?? (/^\d{6}$/.test(holding.id) ? holding.id : undefined);
+      return {
+        ...holding,
+        schemeCode,
+        id: "manual-" + (schemeCode ?? "fund") + "-" + stamp + "-" + index,
+      };
+    });
+
     setHoldings((prev) => {
-      const existingIds = new Set(prev.map((h) => h.id));
-      const next = [...prev, ...newHoldings.filter((h) => !existingIds.has(h.id))];
-      persistHoldings(next);
-      return next;
+      const existingSchemeCodes = new Set(
+        prev.map((h) => h.schemeCode).filter((code): code is string => !!code)
+      );
+      const existingNames = new Set(prev.map((h) => h.name.trim().toLowerCase()));
+
+      return [
+        ...prev,
+        ...normalized.filter((holding) => {
+          if (holding.schemeCode) return !existingSchemeCodes.has(holding.schemeCode);
+          return !existingNames.has(holding.name.trim().toLowerCase());
+        }),
+      ];
     });
     setShowAddForm(false);
   }
 
   function handleSaveEditedHolding(updated: MFHolding) {
-    setHoldings((prev) => { const next = prev.map((h) => h.id === updated.id ? updated : h); persistHoldings(next); return next; });
+    setHoldings((prev) => prev.map((h) => (h.id === updated.id ? updated : h)));
     setEditingHolding(null);
   }
 
@@ -403,13 +755,13 @@ export default function PortfolioXRayScreen() {
     Alert.alert("Remove holding", "Remove this fund from your portfolio?", [
       { text: "Cancel", style: "cancel" },
       { text: "Remove", style: "destructive", onPress: () => {
-        setHoldings((prev) => { const next = prev.filter((h) => h.id !== id); persistHoldings(next); return next; });
+        setHoldings((prev) => prev.filter((h) => h.id !== id));
         setEditingHolding(null);
       }},
     ]);
   }
 
-  // ── NAV refresh ───────────────────────────────────────────────────────────
+  // â”€â”€ NAV refresh â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   async function handleRefreshNAVs() {
     const refreshable = holdings.filter((h) => !!h.schemeCode);
@@ -423,31 +775,82 @@ export default function PortfolioXRayScreen() {
 
     try {
       setRefreshing(true);
-      setRefreshNote("Fetching latest NAVs...");
+      setRefreshNote("Fetching latest NAVs for " + refreshable.length + " funds...");
       let updated = 0;
-      let failed  = 0;
-      const now   = new Date();
+      let failed = 0;
+      let timedOut = 0;
+      const now = new Date();
 
-      const updatedHoldings = await Promise.all(
-        holdings.map(async (h) => {
-          if (!h.schemeCode) return h;
-          const result = await fetchLatestNAV(h.schemeCode);
-          if (!result) { failed++; return h; }
-          updated++;
-          return { ...h, nav: result.nav, currentValue: h.units * result.nav } as MFHolding;
+      const results = await Promise.allSettled(
+        holdings.map(async (holding) => {
+          if (!holding.schemeCode) {
+            return { status: "skipped" as const };
+          }
+
+          const navResult = await fetchLatestNAVWithRetry(holding.schemeCode, 1, 2000);
+          if (!navResult.ok) {
+            return { status: "failed" as const, reason: navResult.reason };
+          }
+
+          return {
+            status: "success" as const,
+            holding: {
+              ...holding,
+              nav: navResult.nav,
+              currentValue: holding.units * navResult.nav,
+            } as MFHolding,
+          };
         })
       );
 
-      persistHoldings(updatedHoldings);
+      const updatedHoldings = results.map((outcome, index) => {
+        const original = holdings[index];
+
+        if (outcome.status === "rejected") {
+          failed += 1;
+          console.warn("[Refresh] Rejected promise for " + original.name + ":", outcome.reason);
+          return original;
+        }
+
+        if (outcome.value.status === "success") {
+          updated += 1;
+          return outcome.value.holding;
+        }
+
+        if (outcome.value.status === "failed") {
+          failed += 1;
+          if (outcome.value.reason === "timeout") timedOut += 1;
+        }
+
+        return original;
+      });
+
+      setHoldings(updatedHoldings);
       const timeStr = now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
       setLastRefreshed(timeStr);
-      setRefreshNote(
-        updated + " fund" + (updated !== 1 ? "s" : "") + " updated" +
-        (failed > 0 ? " · " + failed + " failed" : "") +
-        " · " + timeStr
-      );
-    } catch {
+
+      const parts: string[] = [];
+      if (updated > 0) parts.push(updated + " updated");
+      if (failed > 0) parts.push(failed + " failed");
+      if (timedOut > 0) parts.push(timedOut + " timed out");
+      parts.push(timeStr);
+      setRefreshNote(parts.join(" · "));
+
+      if (updated === 0 && failed > 0) {
+        Alert.alert(
+          "NAV refresh unavailable",
+          timedOut > 0
+            ? "mfapi is responding slowly right now. None of your NAVs were updated. Please try again in a few minutes."
+            : "Could not refresh NAVs right now. The API may be temporarily unavailable. Please try again in a few minutes."
+        );
+      }
+    } catch (err) {
+      console.error("[Refresh] Unexpected error:", err);
       setRefreshNote("Refresh failed. Check your connection.");
+      Alert.alert(
+        "Refresh failed",
+        "Something went wrong while refreshing NAVs. Please check your connection and try again."
+      );
     } finally {
       setRefreshing(false);
     }
@@ -486,8 +889,15 @@ export default function PortfolioXRayScreen() {
   const overallXirrColor = xirrColor(xray.overallXIRR);
   const xirrText         = xray.overallXIRR !== null ? xray.overallXIRR.toFixed(1) + "%" : "N/A";
   const dragText         = formatINR(xray.expenseRatioDrag) + "/yr";
+  const riskAligned      = !!riskAnalysis && riskAnalysis.issues.length === 0;
+  const emergencyLabel   =
+    emergencyStatus?.status === "adequate"
+      ? "Adequate"
+      : emergencyStatus?.status === "low"
+        ? "Low"
+        : "Critical";
 
-  // ── render ────────────────────────────────────────────────────────────────
+  // â”€â”€ render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   return (
     <Screen scroll>
@@ -497,7 +907,7 @@ export default function PortfolioXRayScreen() {
         <Text style={styles.screenTitle}>Your funds, dissected</Text>
       </View>
 
-      {/* ── hero card ── */}
+      {/* â”€â”€ hero card â”€â”€ */}
       {hasPortfolio ? (
         <Animatable.View animation="fadeInUp" delay={0} duration={400}>
           <View style={styles.heroCard}>
@@ -530,7 +940,7 @@ export default function PortfolioXRayScreen() {
               ))}
             </View>
 
-            {/* ── refresh NAVs row ── */}
+            {/* â”€â”€ refresh NAVs row â”€â”€ */}
             <View style={styles.refreshNavRow}>
               <View style={styles.refreshNavLeft}>
                 <Text style={styles.refreshNavTime}>
@@ -557,7 +967,155 @@ export default function PortfolioXRayScreen() {
         </Animatable.View>
       ) : null}
 
-      {/* ── add funds ── */}
+      {hasPortfolio && riskAnalysis ? (
+        <Animatable.View animation="fadeInUp" delay={30} duration={400}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionLabel}>Risk alignment</Text>
+          </View>
+          <View style={styles.analysisCard}>
+            <View style={styles.analysisHeaderRow}>
+              <Text style={styles.analysisTitle}>Profile vs allocation</Text>
+              <View
+                style={[
+                  styles.analysisBadge,
+                  riskAligned ? styles.analysisBadgeOk : styles.analysisBadgeWarn,
+                ]}
+              >
+                <Text style={[styles.analysisBadgeText, riskAligned ? styles.analysisBadgeTextOk : styles.analysisBadgeTextWarn]}>
+                  {riskAligned ? "Aligned" : "Needs attention"}
+                </Text>
+              </View>
+            </View>
+            <Text style={styles.analysisBody}>
+              {"Equity exposure: " +
+                riskAnalysis.equityPct.toFixed(0) +
+                "%" +
+                (riskAnalysis.recommendedMaxEquity !== null
+                  ? " - age-guide max " + riskAnalysis.recommendedMaxEquity.toFixed(0) + "%"
+                  : "")}
+            </Text>
+            {riskAnalysis.issues.length > 0 ? (
+              <View style={styles.analysisList}>
+                {riskAnalysis.issues.map((issue, index) => (
+                  <Text key={index} style={styles.analysisListItem}>
+                    {"- " + issue}
+                  </Text>
+                ))}
+              </View>
+            ) : (
+              <Text style={styles.analysisSubtext}>
+                Current mix looks consistent with your declared risk profile.
+              </Text>
+            )}
+          </View>
+        </Animatable.View>
+      ) : null}
+
+      {hasPortfolio && savingsVelocity ? (
+        <Animatable.View animation="fadeInUp" delay={45} duration={400}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionLabel}>Savings velocity</Text>
+          </View>
+          <View style={styles.analysisCard}>
+            <View style={styles.analysisMetricRow}>
+              <View style={styles.analysisMetric}>
+                <Text style={styles.analysisMetricLabel}>Target / month</Text>
+                <Text style={styles.analysisMetricValue}>{formatINR(savingsVelocity.targetMonthly)}</Text>
+              </View>
+              <View style={styles.analysisMetricDivider} />
+              <View style={styles.analysisMetric}>
+                <Text style={styles.analysisMetricLabel}>Current / month</Text>
+                <Text style={styles.analysisMetricValue}>{formatINR(savingsVelocity.currentMonthly)}</Text>
+              </View>
+            </View>
+            <Text
+              style={[
+                styles.analysisBody,
+                savingsVelocity.gap > 0 ? styles.analysisWarningText : styles.analysisOkText,
+              ]}
+            >
+              {savingsVelocity.gap > 0
+                ? "Invest about " + formatINR(savingsVelocity.gap) + " more monthly to reach the 20% savings target."
+                : "Savings pace is on track at roughly " + savingsVelocity.savingsRate.toFixed(0) + "% of monthly income."}
+            </Text>
+            <Text style={styles.analysisSubtext}>{savingsVelocity.sourceNote}</Text>
+          </View>
+        </Animatable.View>
+      ) : null}
+
+      {hasPortfolio && emergencyStatus ? (
+        <Animatable.View animation="fadeInUp" delay={60} duration={400}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionLabel}>Emergency fund</Text>
+          </View>
+          <View style={styles.analysisCard}>
+            <View style={styles.analysisHeaderRow}>
+              <Text style={styles.analysisTitle}>Liquidity readiness</Text>
+              <View
+                style={[
+                  styles.analysisBadge,
+                  emergencyStatus.status === "adequate"
+                    ? styles.analysisBadgeOk
+                    : emergencyStatus.status === "low"
+                      ? styles.analysisBadgeWarn
+                      : styles.analysisBadgeCritical,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.analysisBadgeText,
+                    emergencyStatus.status === "adequate"
+                      ? styles.analysisBadgeTextOk
+                      : emergencyStatus.status === "low"
+                        ? styles.analysisBadgeTextWarn
+                        : styles.analysisBadgeTextCritical,
+                  ]}
+                >
+                  {emergencyLabel}
+                </Text>
+              </View>
+            </View>
+            <Text style={styles.analysisBody}>
+              {"Covers " +
+                emergencyStatus.monthsCovered.toFixed(1) +
+                " months of expenses - liquid assets " +
+                formatINR(emergencyStatus.liquidAssets)}
+            </Text>
+            {emergencyStatus.status !== "adequate" ? (
+              <Text style={styles.analysisWarningText}>
+                {"Build " + formatINR(emergencyStatus.shortfall) + " more to reach a 6-month buffer."}
+              </Text>
+            ) : (
+              <Text style={styles.analysisOkText}>Emergency reserve looks adequate for current expense levels.</Text>
+            )}
+          </View>
+        </Animatable.View>
+      ) : null}
+
+      {hasPortfolio && taxEfficiency ? (
+        <Animatable.View animation="fadeInUp" delay={75} duration={400}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionLabel}>Tax efficiency</Text>
+          </View>
+          <View style={styles.analysisCard}>
+            <View style={styles.analysisMetricRow}>
+              <View style={styles.analysisMetric}>
+                <Text style={styles.analysisMetricLabel}>80C used</Text>
+                <Text style={styles.analysisMetricValue}>{formatINR(taxEfficiency.estimated80CContribution)}</Text>
+              </View>
+              <View style={styles.analysisMetricDivider} />
+              <View style={styles.analysisMetric}>
+                <Text style={styles.analysisMetricLabel}>80C remaining</Text>
+                <Text style={styles.analysisMetricValue}>{formatINR(taxEfficiency.remaining80CLimit)}</Text>
+              </View>
+            </View>
+            <Text style={styles.analysisBody}>{"ELSS allocation value: " + formatINR(taxEfficiency.elssValue)}</Text>
+            <Text style={styles.analysisSubtext}>{taxEfficiency.recommendation}</Text>
+          </View>
+        </Animatable.View>
+      ) : null}
+
+      {/* â”€â”€ add funds â”€â”€ */}
       <Animatable.View animation="fadeInUp" delay={50} duration={400}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionLabel}>Add funds</Text>
@@ -565,7 +1123,7 @@ export default function PortfolioXRayScreen() {
         <View style={styles.uploadCard}>
           <Text style={styles.uploadTitle}>Upload statement</Text>
           <Text style={styles.uploadBody}>
-            CAMS or KFintech screenshot — Gemini Vision extracts holdings with real transaction dates for accurate XIRR.
+            CAMS or KFintech screenshot â€” Gemini Vision extracts holdings with real transaction dates for accurate XIRR.
           </Text>
           <TouchableOpacity
             disabled={parsing}
@@ -583,12 +1141,12 @@ export default function PortfolioXRayScreen() {
         </TouchableOpacity>
       </Animatable.View>
 
-      {/* ── holdings list ── */}
+      {/* â”€â”€ holdings list â”€â”€ */}
       {hasPortfolio ? (
         <>
           <Animatable.View animation="fadeInUp" delay={100} duration={400}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionLabel}>{"Holdings · " + holdings.length + " funds"}</Text>
+              <Text style={styles.sectionLabel}>{"Holdings Â· " + holdings.length + " funds"}</Text>
               <Text style={styles.sectionNote}>Tap to edit</Text>
             </View>
             <View style={styles.holdingList}>
@@ -598,10 +1156,10 @@ export default function PortfolioXRayScreen() {
             </View>
           </Animatable.View>
 
-          {/* ── benchmark ── */}
+          {/* â”€â”€ benchmark â”€â”€ */}
           <Animatable.View animation="fadeInUp" delay={140} duration={400}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionLabel}>Benchmark · vs Nifty 50</Text>
+              <Text style={styles.sectionLabel}>Benchmark Â· vs Nifty 50</Text>
             </View>
             <View style={styles.card}>
               <View style={styles.benchRow}>
@@ -638,7 +1196,7 @@ export default function PortfolioXRayScreen() {
             </View>
           </Animatable.View>
 
-          {/* ── overlap ── */}
+          {/* â”€â”€ overlap â”€â”€ */}
           {xray.overlapPairs.length > 0 ? (
             <Animatable.View animation="fadeInUp" delay={170} duration={400}>
               <View style={styles.sectionHeader}>
@@ -650,7 +1208,7 @@ export default function PortfolioXRayScreen() {
             </Animatable.View>
           ) : null}
 
-          {/* ── expense drag ── */}
+          {/* â”€â”€ expense drag â”€â”€ */}
           <Animatable.View animation="fadeInUp" delay={200} duration={400}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionLabel}>Expense drag</Text>
@@ -664,7 +1222,7 @@ export default function PortfolioXRayScreen() {
             </View>
           </Animatable.View>
 
-          {/* ── AI rebalancing plan ── */}
+          {/* â”€â”€ AI rebalancing plan â”€â”€ */}
           <Animatable.View animation="fadeInUp" delay={230} duration={400}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionLabel}>AI rebalancing plan</Text>
@@ -683,12 +1241,12 @@ export default function PortfolioXRayScreen() {
             </View>
           </Animatable.View>
 
-          {/* ── share ── */}
+          {/* â”€â”€ share â”€â”€ */}
           <Animatable.View animation="fadeInUp" delay={260} duration={400}>
             <View style={styles.shareRow}>
               <View style={styles.shareInfo}>
                 <Text style={styles.shareTitle}>Export X-Ray card</Text>
-                <Text style={styles.shareSubtitle}>Biometric required · no fund names shared</Text>
+                <Text style={styles.shareSubtitle}>Biometric required Â· no fund names shared</Text>
               </View>
               <TouchableOpacity style={styles.shareBtn} onPress={handleShare} disabled={sharing} activeOpacity={0.8}>
                 {sharing ? <ActivityIndicator color={Colors.bg} size="small" /> : <Text style={styles.shareBtnText}>Share</Text>}
@@ -709,11 +1267,11 @@ export default function PortfolioXRayScreen() {
 
       <View style={styles.bottomPad} />
 
-      {/* ── ViewShot ── */}
+      {/* â”€â”€ ViewShot â”€â”€ */}
       <View pointerEvents="none" style={styles.captureContainer}>
         <ViewShot ref={shareCardRef} options={{ format: "png", quality: 1 }}>
           <View collapsable={false} style={styles.captureCard}>
-            <Text style={styles.captureBrand}>ET FinMentor · Portfolio X-Ray</Text>
+            <Text style={styles.captureBrand}>ET FinMentor Â· Portfolio X-Ray</Text>
             <Text style={styles.captureValue}>{formatINR(xray.totalValue)}</Text>
             <Text style={styles.captureLabel}>Portfolio value</Text>
             <View style={styles.captureDivider} />
@@ -725,7 +1283,7 @@ export default function PortfolioXRayScreen() {
         </ViewShot>
       </View>
 
-      {/* ── modals ── */}
+      {/* â”€â”€ modals â”€â”€ */}
       {editingHolding ? (
         <HoldingEditModal
           holding={editingHolding}
@@ -749,7 +1307,7 @@ export default function PortfolioXRayScreen() {
   );
 }
 
-// ─── styles ───────────────────────────────────────────────────────────────────
+// â”€â”€â”€ styles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const styles = StyleSheet.create({
   pageHeader:    { marginBottom: Spacing.lg },
@@ -778,6 +1336,29 @@ const styles = StyleSheet.create({
   allocItem:   { flexDirection: "row", alignItems: "center", gap: 5 },
   allocDot:    { width: 6, height: 6, borderRadius: 3 },
   allocText:   { color: Colors.t1, fontFamily: Typography.fontFamily.body, fontSize: Typography.size.xs },
+
+  analysisCard: { backgroundColor: Colors.s1, borderColor: Colors.b1, borderRadius: Radius.md, borderWidth: 0.5, padding: Spacing.md, marginBottom: Spacing.md },
+  analysisHeaderRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: Spacing.sm, marginBottom: Spacing.xs },
+  analysisTitle: { color: Colors.t0, fontFamily: Typography.fontFamily.bodyMedium, fontSize: Typography.size.sm },
+  analysisBadge: { borderRadius: Radius.full, borderWidth: 0.5, paddingHorizontal: Spacing.sm, paddingVertical: 2 },
+  analysisBadgeOk: { backgroundColor: Colors.tealDim, borderColor: "rgba(31,190,114,0.22)" },
+  analysisBadgeWarn: { backgroundColor: Colors.amberDim, borderColor: "rgba(217,142,56,0.22)" },
+  analysisBadgeCritical: { backgroundColor: Colors.redDim, borderColor: "rgba(220,78,78,0.22)" },
+  analysisBadgeText: { fontFamily: Typography.fontFamily.bodyMedium, fontSize: 10 },
+  analysisBadgeTextOk: { color: Colors.teal },
+  analysisBadgeTextWarn: { color: Colors.amber },
+  analysisBadgeTextCritical: { color: Colors.red },
+  analysisBody: { color: Colors.t1, fontFamily: Typography.fontFamily.body, fontSize: Typography.size.xs, lineHeight: 18, marginBottom: Spacing.xs },
+  analysisSubtext: { color: Colors.t2, fontFamily: Typography.fontFamily.body, fontSize: 10, lineHeight: 16 },
+  analysisList: { gap: 4 },
+  analysisListItem: { color: Colors.t1, fontFamily: Typography.fontFamily.body, fontSize: Typography.size.xs, lineHeight: 18 },
+  analysisMetricRow: { flexDirection: "row", alignItems: "center", marginBottom: Spacing.sm },
+  analysisMetric: { flex: 1 },
+  analysisMetricLabel: { color: Colors.t2, fontFamily: Typography.fontFamily.bodyMedium, fontSize: 10, textTransform: "uppercase", marginBottom: 3 },
+  analysisMetricValue: { color: Colors.t0, fontFamily: Typography.fontFamily.numeric, fontSize: Typography.size.sm },
+  analysisMetricDivider: { width: 0.5, height: 34, backgroundColor: Colors.b0, marginHorizontal: Spacing.sm },
+  analysisWarningText: { color: Colors.amber, fontFamily: Typography.fontFamily.bodyMedium, fontSize: Typography.size.xs, lineHeight: 18 },
+  analysisOkText: { color: Colors.teal, fontFamily: Typography.fontFamily.bodyMedium, fontSize: Typography.size.xs, lineHeight: 18 },
 
   refreshNavRow:         { flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderTopWidth: 0.5, borderTopColor: Colors.b0, marginTop: Spacing.md, paddingTop: Spacing.md, gap: Spacing.md },
   refreshNavLeft:        { flex: 1 },

@@ -16,7 +16,7 @@ type LiquidProgressBarProps = {
   height?: number;
   showLabel?: boolean;
   label?: string;
-  style?: StyleProp<ViewStyle>;
+  style?: StyleProp<ViewStyle>; 
   labelStyle?: StyleProp<TextStyle>;
 };
 

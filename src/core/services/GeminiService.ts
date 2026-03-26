@@ -772,6 +772,69 @@ export const GeminiService = {
     profile: UserProfileData,
     xray: import("../models/UserProfile").PortfolioXRay
   ): Promise<string> {
+    const equityPct =
+      (xray.categoryAllocation.large_cap ?? 0) +
+      (xray.categoryAllocation.mid_cap ?? 0) +
+      (xray.categoryAllocation.small_cap ?? 0) +
+      (xray.categoryAllocation.elss ?? 0) +
+      (xray.categoryAllocation.hybrid ?? 0);
+    const debtPct = xray.categoryAllocation.debt ?? 0;
+    const liquidPct = xray.categoryAllocation.liquid ?? 0;
+    const elssPct = xray.categoryAllocation.elss ?? 0;
+    const monthlyExpenses =
+      profile.monthlyExpenses > 0 ? profile.monthlyExpenses : Math.max(0, profile.monthlyIncome * 0.5);
+    const liquidAssets =
+      profile.emergencyFund +
+      (xray.totalValue * liquidPct) / 100 +
+      ((xray.totalValue * debtPct) / 100) * 0.5;
+    const emergencyMonths = monthlyExpenses > 0 ? liquidAssets / monthlyExpenses : 0;
+    const used80C = Math.min(150_000, Math.max(0, profile.annual80C + profile.annualPF));
+    const remaining80C = Math.max(0, 150_000 - used80C);
+    const ageGuideMaxEquity = profile.age > 0 ? Math.max(100 - profile.age, 30) : null;
+    const goalsSummary = profile.goals.length > 0 ? profile.goals.map((goal) => `- ${goal}`).join("\n") : "- No explicit goals provided";
+    const holdingsSummary = xray.holdings
+      .map((holding) => `- ${holding.name} (${formatINR(holding.currentValue)} in ${holding.category})`)
+      .join("\n");
+    const overlapSummary = xray.overlapPairs.length > 0
+      ? xray.overlapPairs.map((pair) => `${pair.fund1} & ${pair.fund2} (${pair.overlapLevel})`).join(", ")
+      : "None";
+
+    const contextBlock = [
+      "Write exactly 3 distinct, actionable bullet points for a personalized mutual fund rebalancing plan.",
+      "Stay under 150 words total. Do NOT use markdown bolding or bullet asterisks. Use only '1. ', '2. ', '3. '.",
+      "Keep each point concrete and fund-level where possible.",
+      "",
+      "USER CONTEXT:",
+      `Age: ${profile.age}`,
+      `Risk profile: ${profile.riskProfile}`,
+      `Monthly income: ${formatINR(profile.monthlyIncome)}`,
+      `Monthly expenses: ${formatINR(monthlyExpenses)}`,
+      `Tracked SIP: ${formatINR(profile.monthlySIP)}`,
+      `Emergency fund (cash/liquid): ${formatINR(profile.emergencyFund)} (~${emergencyMonths.toFixed(1)} months including liquid/debt MF buffers)`,
+      `80C used: ${formatINR(used80C)} / ${formatINR(150_000)} (remaining ${formatINR(remaining80C)})`,
+      ageGuideMaxEquity !== null
+        ? `Age-based equity guide max: ${ageGuideMaxEquity.toFixed(0)}%`
+        : "Age-based equity guide max: unavailable",
+      "",
+      "GOALS:",
+      goalsSummary,
+      "",
+      "PORTFOLIO STATE:",
+      `Total value: ${formatINR(xray.totalValue)}`,
+      `Overall XIRR: ${xray.overallXIRR !== null ? xray.overallXIRR.toFixed(1) + "%" : "unknown"}`,
+      `Expense drag: ${formatINR(xray.expenseRatioDrag)}/yr`,
+      `Allocation: Equity ${equityPct.toFixed(1)}%, Debt ${debtPct.toFixed(1)}%, Liquid ${liquidPct.toFixed(1)}%, ELSS ${elssPct.toFixed(1)}%`,
+      `Overlap issues: ${overlapSummary}`,
+      "Holdings:",
+      holdingsSummary,
+      "",
+      "GENERATE 3 ACTIONS IN THIS ORDER:",
+      "1. Overlap/concentration fix",
+      "2. Risk + age + goals alignment change",
+      "3. Cost or tax-efficiency optimization (80C/ELSS/direct plans)",
+      "Be specific on what to reduce, hold, or increase.",
+    ].join("\n");
+
     const data = await requestGemini({
       system_instruction: {
         parts: [{ text: buildSystemInstruction(profile) }],
@@ -781,25 +844,14 @@ export const GeminiService = {
           role: "user",
           parts: [
             {
-              text: [
-                "Write exactly 3 distinct, actionable bullet points for a personalized mutual fund rebalancing plan.",
-                "Stay under 150 words total. Do NOT use markdown bolding or formatting bullet asterisks, just write '1. ', '2. ', '3. '.",
-                "The user's current holdings are:",
-                xray.holdings.map(h => `- ${h.name} (${formatINR(h.currentValue)} in ${h.category})`).join("\n"),
-                `Their overall XIRR is ${xray.overallXIRR !== null ? xray.overallXIRR.toFixed(1) + '%' : 'unknown'}.`,
-                `They are losing a massive ${formatINR(xray.expenseRatioDrag)}/yr individually to active fund expense ratios vs an equivalent index fund.`,
-                xray.overlapPairs.length > 0 
-                  ? `Significant overlaps detected: ${xray.overlapPairs.map(o => `${o.fund1} & ${o.fund2} (${o.overlapLevel} overlap)`).join(', ')}.` 
-                  : "No high overlapping scheme pairs detected.",
-                "Provide highly specific fund-level advice: name the exact funds to consolidate, sell, or shift SIPs toward (e.g. telling them to sell the underperforming active flexi cap and move it to a low-cost NIFTY 50 index based on the numbers). Ensure your advice accurately reflects their risk profile and data.",
-              ].join("\n"),
+              text: contextBlock,
             },
           ],
         },
       ],
       generationConfig: {
-        temperature: 0.6,
-        maxOutputTokens: 250,
+        temperature: 0.5,
+        maxOutputTokens: 260,
       },
     }, { feature: "portfolio-rebalancing" });
 

@@ -206,42 +206,42 @@ function ProjectionBarChart({ data, fireTarget, width }: {
   const showFireLine = fireTarget > 0 && fireY >= padT && fireY <= padT + plotH;
 
   return (
-    <Svg width={svgW} height={svgH}>
-      {yTicks.map((tick) => {
-        const y = yPos(tick);
-        return (
-          <React.Fragment key={"y-" + tick}>
-            <Line x1={padL} y1={y} x2={svgW - padR} y2={y}
-              stroke="rgba(255,255,255,0.06)" strokeWidth={0.5} />
-            <SvgText x={padL - 6} y={y + 4} textAnchor="end"
-              fill="rgba(255,255,255,0.35)" fontSize={9}>
-              {yFmt(tick)}
-            </SvgText>
-          </React.Fragment>
-        );
-      })}
-      {showFireLine ? (
-        <Line x1={padL} y1={fireY} x2={svgW - padR} y2={fireY}
-          stroke="#DC4E4E" strokeWidth={1.5} strokeDasharray="6,4" opacity={0.7} />
-      ) : null}
-      {data.map((d, i) => {
-        const x   = xPos(i) - barW / 2;
-        const top = yPos(d.corpus);
-        const h   = Math.max(padT + plotH - top, 2);
-        return (
-          <Rect key={"bar-" + d.age} x={x} y={top} width={barW} height={h}
-            fill={d.highlighted ? "#D4AF37" : "#2A4A7F"} rx={3} />
-        );
-      })}
-      <Line x1={padL} y1={padT + plotH} x2={svgW - padR} y2={padT + plotH}
-        stroke="rgba(255,255,255,0.15)" strokeWidth={0.5} />
-      {data.map((d, i) => (
-        <SvgText key={"x-" + d.age} x={xPos(i)} y={svgH - 8}
-          textAnchor="middle" fill="rgba(255,255,255,0.4)" fontSize={10}>
-          {String(d.age)}
-        </SvgText>
-      ))}
-    </Svg>
+      <Svg width={svgW} height={svgH}>
+        {yTicks.map((tick) => {
+          const y = yPos(tick);
+          return (
+            <React.Fragment key={"y-" + tick}>
+              <Line x1={padL} y1={y} x2={svgW - padR} y2={y}
+                stroke="rgba(255,255,255,0.06)" strokeWidth={0.5} />
+              <SvgText x={padL - 6} y={y + 4} textAnchor="end"
+                fill="rgba(255,255,255,0.35)" fontSize={9}>
+                {yFmt(tick)}
+              </SvgText>
+            </React.Fragment>
+          );
+        })}
+        {showFireLine ? (
+          <Line x1={padL} y1={fireY} x2={svgW - padR} y2={fireY}
+            stroke="#DC4E4E" strokeWidth={1.5} strokeDasharray="6,4" opacity={0.7} />
+        ) : null}
+        {data.map((d, i) => {
+          const x   = xPos(i) - barW / 2;
+          const top = yPos(d.corpus);
+          const h   = Math.max(padT + plotH - top, 2);
+          return (
+            <Rect key={"bar-" + d.age} x={x} y={top} width={barW} height={h}
+              fill={d.highlighted ? "#D4AF37" : "#2A4A7F"} rx={3} />
+          );
+        })}
+        <Line x1={padL} y1={padT + plotH} x2={svgW - padR} y2={padT + plotH}
+          stroke="rgba(255,255,255,0.15)" strokeWidth={0.5} />
+        {data.map((d, i) => (
+          <SvgText key={"x-" + d.age} x={xPos(i)} y={svgH - 8}
+            textAnchor="middle" fill="rgba(255,255,255,0.4)" fontSize={10}>
+            {String(d.age)}
+          </SvgText>
+        ))}
+      </Svg>
   );
 }
 

@@ -18,10 +18,12 @@ import { Screen } from "../../src/components/Screen";
 import { TiltCard } from "../../src/components/TiltCard";
 import {
   formatINR,
+  getCategoryAllocation,
   getEmergencyFundMonths,
   getFireCorpusTarget,
   getOverallHealthScore,
   getSavingsRate,
+  projectedCorpusAtAge,
 } from "../../src/core/models/UserProfile";
 import { useAppStore } from "../../src/core/services/store";
 import { Colors, Radius, Shadows, Spacing, Typography } from "../../src/core/theme";
@@ -210,8 +212,9 @@ function NewsCard({
 // ─── screen ──────────────────────────────────────────────────────────────────
 
 export default function DashboardHome() {
-  const profile       = useAppStore((state) => state.currentProfile);
-  const portfolioXRay = useAppStore((state) => state.portfolioXRay);
+  const profile         = useAppStore((state) => state.currentProfile);
+  const portfolioXRay   = useAppStore((state) => state.portfolioXRay);
+  const setPortfolioXRay = useAppStore((state) => state.setPortfolioXRay);
   const [focusArea, setFocusArea] = useState<FocusArea>("portfolio");
 
   // news state
@@ -219,13 +222,25 @@ export default function DashboardHome() {
   const [newsLoading, setNewsLoading] = useState(false);
   const [newsError,   setNewsError]   = useState("");
 
-  const totalPortfolioValue = portfolioXRay?.totalValue ?? 0;
+  const { totalPortfolioValue, corpusProgress } = useMemo(() => {
+    const fromStore = portfolioXRay?.totalValue ?? 0;
+    const fromProfile =
+      profile?.camsData?.holdings?.reduce((sum, h) => sum + (h.currentValue || 0), 0) ?? 0;
+
+    const value = fromStore > 0 ? fromStore : fromProfile;
+    const target = profile ? getFireCorpusTarget(profile) : 0;
+
+    const projected = profile ? projectedCorpusAtAge(profile, profile.retirementAge) : 0;
+    const progress = target > 0 ? Math.min(value / target, 1) : 0;
+
+    return { totalPortfolioValue: value, corpusProgress: progress };
+  }, [portfolioXRay?.totalValue, profile?.camsData?.holdings, profile]);
+
   const xirr            = portfolioXRay?.overallXIRR ?? null;
   const healthScore     = profile ? getOverallHealthScore(profile) : 0;
   const savingsRate     = profile ? getSavingsRate(profile) : 0;
   const emergencyMonths = profile ? getEmergencyFundMonths(profile) : 0;
   const fireTarget      = profile ? getFireCorpusTarget(profile) : 0;
-  const corpusProgress  = fireTarget > 0 ? Math.min(totalPortfolioValue / fireTarget, 1) : 0;
   const firstName       = profile?.name?.split(" ")[0] ?? "Investor";
 
   const greeting = useMemo(() => {
@@ -241,14 +256,37 @@ export default function DashboardHome() {
   const emergencyText   = "Emergency runway: " + emergencyMonths.toFixed(1) + " months";
   const riskText        = "Risk style: " + (profile?.riskProfile ?? "Balanced");
   const healthScoreText = healthScore.toFixed(0) + "/100";
-  const fireBodyText    = fireTarget > 0
-    ? formatINR(totalPortfolioValue, true) + " of " + formatINR(fireTarget, true) + " target corpus"
-    : "Complete your profile to unlock FIRE target.";
-
+  
   const hasPortfolio       = portfolioXRay !== null && portfolioXRay.holdings.length > 0;
   const allocationSegments = portfolioXRay
     ? Object.entries(portfolioXRay.categoryAllocation).filter(([, v]) => v > 0)
     : [];
+
+  useEffect(() => {
+    if (!portfolioXRay && profile?.camsData?.holdings?.length) {
+      const holdings = profile.camsData.holdings;
+      const computedXRay = {
+        holdings,
+        totalValue: holdings.reduce((s, h) => s + h.currentValue, 0),
+        totalInvested: holdings.reduce((s, h) => s + h.purchaseValue, 0),
+        overallXIRR: null,
+        overlapPairs: [],
+        expenseRatioDrag: 0,
+        categoryAllocation: getCategoryAllocation(holdings),
+      };
+      setPortfolioXRay(computedXRay);
+    }
+  }, [portfolioXRay, profile, setPortfolioXRay]);
+
+  useEffect(() => {
+    if (!__DEV__) return;
+    if (!profile) return;
+    console.log("[FIRE]", {
+      value: totalPortfolioValue,
+      target: fireTarget,
+      progress: corpusProgress,
+    });
+  }, [totalPortfolioValue, fireTarget, corpusProgress, profile]);
 
   // ── fetch ET news on mount ─────────────────────────────────────────────────
 
@@ -408,8 +446,16 @@ export default function DashboardHome() {
         <Pressable onPress={() => setFocusArea("momentum")}>
           <View style={[styles.card, styles.momentumCard]}>
             <Text style={[styles.bentoHeading, focusText(focusArea === "momentum")]}>Momentum To FIRE</Text>
-            <LiquidProgressBar label="Corpus fill" progress={corpusProgress} />
-            <Text style={styles.bentoBody}>{fireBodyText}</Text>
+            <LiquidProgressBar label="Retirement corpus readiness" progress={corpusProgress} />
+<Text style={styles.bentoBody}>
+  {fireTarget > 0 && profile
+    ? formatINR(projectedCorpusAtAge(profile, profile.retirementAge), true) +
+      " projected by age " +
+      profile.retirementAge +
+      " · target " +
+      formatINR(fireTarget, true)
+    : "Set your retirement expense in profile to unlock this."}
+</Text>
           </View>
         </Pressable>
       </Animatable.View>
