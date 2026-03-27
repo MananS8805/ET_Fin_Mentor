@@ -4,6 +4,11 @@
 > Built for the problem statement: *"95% of Indians don't have a financial plan. Make financial planning as accessible as checking WhatsApp."*
 
 ---
+![dashboard](asset/images/dashnoard_profile.jpeg)
+![modules](asset/images/modules.jpeg)
+![portfolio-xray](asset/images/portfolio-xray.jpeg)
+![fire planner](asset/images/Fire.jpeg)
+
 
 ## What It Does
 
