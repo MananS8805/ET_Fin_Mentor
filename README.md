@@ -4,7 +4,7 @@
 > Built for the problem statement: *"95% of Indians don't have a financial plan. Make financial planning as accessible as checking WhatsApp."*
 
 ---
-![dashboard](assets/images/dashnoard_profile.jpeg)
+![dashboard](assets/images/dashboard_profile.jpeg)
 ![modules](assets/images/modules.jpeg)
 ![portfolio-xray](assets/images/portfolio-xray.jpeg)
 ![fire planner](assets/images/Fire.jpeg)
@@ -90,6 +90,7 @@ User (React Native / Expo Go)
                     └── Money Chat (Gemini/Groq stream with full context)
 ```
 
+![architecture](assets/images/architecture.png)
 **Key design decisions:**
 - Every AI feature has a `TemplateService` offline fallback — the app is fully usable without internet
 - PII scrubbing before any AI API call (Aadhaar, PAN, phone, email redacted)
@@ -191,6 +192,7 @@ See `docs/IMPACT_MODEL.md` for the full quantified estimate.
 **Summary:** If 1% of ET's 50M MAU adopt ET FinMentor, that's 500,000 users. At ₹25,000/year CA fee savings per user, this represents **₹1,250 crore in annual financial planning cost savings**. Average LTCG tax harvesting across both PAN cards saves ₹15,600/user/year in deferred capital gains tax.
 
 ---
+![impact_model](assets/images/impact_model.png)
 
 ## Team
 
