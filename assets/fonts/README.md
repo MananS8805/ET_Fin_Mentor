@@ -1,9 +1,9 @@
-Add these font files before running the app on device:
+Fonts currently used by the app are loaded in app/_layout.tsx:
 
-- Syne-Bold.ttf
-- Syne-SemiBold.ttf
+- InstrumentSerif-Regular.ttf
 - DMSans-Regular.ttf
 - DMSans-Medium.ttf
+- DMMono-Regular.ttf
 
-Once the files are present, wire them into `app/_layout.tsx` using `useFonts`.
+Keep file names in this folder aligned with the useFonts map in app/_layout.tsx.
 

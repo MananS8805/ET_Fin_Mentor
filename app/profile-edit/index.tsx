@@ -380,7 +380,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.full,
     borderWidth: 0.5,
     borderColor: Colors.border,
-    backgroundColor: Colors.white,
+    backgroundColor: "#2C2C2E",
     elevation: 0,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
@@ -394,7 +394,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.15,
   },
   chipLabel: {
-    color: Colors.textPrimary,
+    color: Colors.textSecondary,
     fontFamily: Typography.fontFamily.bodyMedium,
     fontSize: Typography.size.sm,
     textTransform: "capitalize",

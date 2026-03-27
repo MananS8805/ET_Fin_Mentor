@@ -10,7 +10,6 @@ import {
   VictoryAxis as BaseVictoryAxis,
   VictoryBar as BaseVictoryBar,
   VictoryLine as BaseVictoryLine,
-  VictoryArea as BaseVictoryArea,
 } from "victory-native";
 
 export function VictoryAxisWrapper(props: React.ComponentProps<typeof BaseVictoryAxis>) {
@@ -23,8 +22,4 @@ export function VictoryBarWrapper(props: React.ComponentProps<typeof BaseVictory
 
 export function VictoryLineWrapper(props: React.ComponentProps<typeof BaseVictoryLine>) {
   return <BaseVictoryLine {...props} />;
-}
-
-export function VictoryAreaWrapper(props: React.ComponentProps<typeof BaseVictoryArea>) {
-  return <BaseVictoryArea {...props} />;
 }
